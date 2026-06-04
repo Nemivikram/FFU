@@ -659,6 +659,8 @@ Controls the `-CleanupAppsISO` parameter. When checked, the Apps ISO file is aut
 
 During the build process, when apps are being installed, the script creates an `Apps.iso` file in the FFU Development Path (for example, `.\FFUDevelopment\Apps.iso`). This ISO contains the contents of the `.\FFUDevelopment\Apps` folder, including application installers, Office deployment files, and orchestration scripts, and is mounted to the VM during the build to install applications.
 
+If an existing `Apps.iso` is present, FFU Builder reuses it when the app inputs have not changed. If app content, app configuration, BYO app data, or the generated `WinGetWin32Apps.json` orchestration file is newer than the ISO, the ISO is refreshed before the VM starts so the VM receives current install commands.
+
 #### When to Disable
 
 You may want to disable Cleanup Apps ISO in the following scenarios:
@@ -755,7 +757,7 @@ During the build process, application content accumulates in several subfolders 
 | `MSStore` | Microsoft Store applications downloaded via Winget                                                                       |
 | `Office`  | Microsoft 365 Apps installer files downloaded by the Office Deployment Tool                                              |
 
-Additionally, the `WinGetWin32Apps.json` orchestration file in `.\FFUDevelopment\Apps\Orchestration` is removed. This file is automatically regenerated at build time based on downloaded applications.
+Additionally, the `WinGetWin32Apps.json` orchestration file in `.\FFUDevelopment\Apps\Orchestration` is removed. This file is generated at build time based on the current downloaded Winget applications and is refreshed when app inputs change.
 
 When this option is enabled, the cleanup process removes:
 

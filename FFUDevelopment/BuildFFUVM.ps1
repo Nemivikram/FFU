@@ -2744,6 +2744,42 @@ function New-AppsISO {
     $AppsPath = '\\?\' + $AppsPath
     Invoke-Process $OSCDIMG "-n -m -d $Appspath $AppsISO" | Out-Null  
 }
+function Test-AppsIsoRefreshRequired {
+    param(
+        [string]$AppsISOPath,
+        [string]$AppsPath,
+        [string[]]$InputPaths = @()
+    )
+
+    if ([string]::IsNullOrWhiteSpace($AppsISOPath) -or -not (Test-Path -Path $AppsISOPath -PathType Leaf)) {
+        return $true
+    }
+
+    $appsIsoLastWriteUtc = (Get-Item -Path $AppsISOPath).LastWriteTimeUtc
+
+    foreach ($inputPath in $InputPaths) {
+        if ([string]::IsNullOrWhiteSpace($inputPath) -or -not (Test-Path -Path $inputPath)) { continue }
+
+        $inputItem = Get-Item -Path $inputPath -Force
+        if ($inputItem.LastWriteTimeUtc -gt $appsIsoLastWriteUtc) {
+            WriteLog "Apps ISO refresh required because $($inputItem.FullName) is newer than $AppsISOPath"
+            return $true
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($AppsPath) -and (Test-Path -Path $AppsPath -PathType Container)) {
+        $newerAppInput = Get-ChildItem -Path $AppsPath -File -Force -Recurse -ErrorAction SilentlyContinue | Where-Object {
+            $_.LastWriteTimeUtc -gt $appsIsoLastWriteUtc
+        } | Select-Object -First 1
+
+        if ($null -ne $newerAppInput) {
+            WriteLog "Apps ISO refresh required because $($newerAppInput.FullName) is newer than $AppsISOPath"
+            return $true
+        }
+    }
+
+    return $false
+}
 function Get-WimFromISO {
     #Mount ISO, get Wim file
     $mountResult = Mount-DiskImage -ImagePath $isoPath -PassThru
@@ -5068,15 +5104,6 @@ function New-RunSession {
                 WriteLog "Backed up DriverMapping.json to $backup"
             }
         }
-        if ($OrchestrationPath) {
-            $wgPath = Join-Path $OrchestrationPath 'WinGetWin32Apps.json'
-            if (Test-Path $wgPath) {
-                $backup2 = Join-Path $backupDir 'WinGetWin32Apps.json'
-                Copy-Item -Path $wgPath -Destination $backup2 -Force
-                $manifest.JsonBackups += @{ Path = $wgPath; Backup = $backup2 }
-                WriteLog "Backed up WinGetWin32Apps.json to $backup2"
-            }
-        }
         # Backup Office XMLs (DeployFFU.xml, DownloadFFU.xml) if present so we can restore them after cleanup
         if ($OfficePath) {
             foreach ($n in @('DeployFFU.xml', 'DownloadFFU.xml')) {
@@ -5675,6 +5702,7 @@ function Cleanup-CurrentRunDownloads {
             'Update-Edge.ps1',
             'Install-Office.ps1',
             'Install-LTSCUpdate.ps1',
+            'WinGetWin32Apps.json',
             'AppsScriptVariables.json'
         )
 
@@ -6461,24 +6489,47 @@ catch {
 #Create apps ISO for Office and/or 3rd party apps
 if ($InstallApps) {
     Set-Progress -Percentage 6 -Message "Downloading and preparing applications..."
-    if (Test-Path -Path $AppsISO) {
+    $appsIsoRefreshRequired = -not (Test-Path -Path $AppsISO -PathType Leaf)
+    if (-not $appsIsoRefreshRequired) {
         WriteLog "Apps ISO exists at: $AppsISO"
 
-        # Refresh the Apps ISO when a BYO app list is present so the staged manifest
-        # and AppInstallConfig.json stay in sync with the current build inputs.
-        if (Test-Path -Path $UserAppListPath) {
-            WriteLog "Configured BYO app list detected. Refreshing Apps ISO to include the latest BYO app list data."
-            Sync-UserAppListForOrchestration -SourcePath $UserAppListPath -AppsPath $AppsPath -OrchestrationPath $OrchestrationPath -AppInstallConfigPath $appInstallConfigPath
-            Remove-Item -Path $AppsISO -Force -ErrorAction SilentlyContinue
-            New-AppsISO
-            WriteLog "Apps ISO refreshed to include the latest BYO app list data."
+        $appIsoInputPaths = @(
+            $AppListPath,
+            $UserAppListPath,
+            $appInstallConfigPath,
+            $wingetWin32jsonFile,
+            $appsScriptVarsJsonPath,
+            $OfficeDownloadXML,
+            $OfficeConfigXMLFile
+        )
+
+        if ($InjectUnattend) {
+            $appIsoInputPaths += Get-UnattendSourcePath -UnattendFolder $UnattendFolder -WindowsArch $WindowsArch -UnattendX64FilePath $UnattendX64FilePath -UnattendArm64FilePath $UnattendArm64FilePath
         }
-        else {
-            WriteLog "Will use existing ISO"
+
+        $appsIsoRefreshRequired = Test-AppsIsoRefreshRequired -AppsISOPath $AppsISO -AppsPath $AppsPath -InputPaths $appIsoInputPaths
+    }
+
+    if (Test-Path -Path $wingetWin32jsonFile -PathType Leaf) {
+        try {
+            WriteLog "Removing generated Winget Win32 app manifest before app preparation: $wingetWin32jsonFile"
+            Remove-Item -Path $wingetWin32jsonFile -Force -ErrorAction Stop
+            WriteLog 'Removal complete'
+        }
+        catch {
+            WriteLog "Failed removing generated Winget Win32 app manifest: $($_.Exception.Message)"
+            if ($appsIsoRefreshRequired) { throw $_ }
         }
     }
-    else {
+
+    if ($appsIsoRefreshRequired) {
         try {
+            if (Test-Path -Path $AppsISO -PathType Leaf) {
+                WriteLog "Refreshing Apps ISO because app inputs changed: $AppsISO"
+                Remove-Item -Path $AppsISO -Force -ErrorAction SilentlyContinue
+                WriteLog 'Removal complete'
+            }
+
             #Check for and download WinGet applications
             if (Test-Path -Path $AppListPath) {
                 $appList = Get-Content -Path $AppListPath -Raw | ConvertFrom-Json
@@ -6930,6 +6981,9 @@ if ($InstallApps) {
             throw $_
         }
     }
+	else {
+		WriteLog "Will use existing ISO"
+	}
 }
 
 #Create VHDX

@@ -159,6 +159,9 @@ function Get-GeneralDefaults {
         Processors                     = 4
         VMLocation                     = $vmLocationPath
         VMNamePrefix                   = "_FFU"
+        SystemPartitionDriveLetter     = 'S'
+        WindowsPartitionDriveLetter    = 'W'
+        RecoveryPartitionDriveLetter   = 'R'
         LogicalSectorSize              = 512
         # Updates Tab Defaults
         UpdateLatestCU                 = $true

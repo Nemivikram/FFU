@@ -43,6 +43,20 @@ Default is `$FFUDevelopmentPath\VM`. This is the location of the VHDX that gets 
 
 Prefix for the generated VM. Default is _FFU.
 
+## System Partition Drive Letter
+
+Drive letter used for the System partition while building the FFU VHDX. Default is `S`.
+
+## Windows Partition Drive Letter
+
+Drive letter used for the Windows partition while building the FFU VHDX. Default is `W`.
+
+## Recovery Partition Drive Letter
+
+Drive letter used for the Recovery partition while building the FFU VHDX. Default is `R`.
+
+These settings only affect FFU creation. They do not change the hard-coded drive letters used by `ApplyFFU.ps1` during deployment.
+
 ## Logical Sector Size
 
 Uint32 value of 512 or 4096. Useful for 4Kn drives or devices shipping with UFS drives. Default is 512.

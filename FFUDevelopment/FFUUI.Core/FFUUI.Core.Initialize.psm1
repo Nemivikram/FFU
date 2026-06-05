@@ -255,6 +255,9 @@ function Initialize-UIControls {
     $State.Controls.txtProcessors = $window.FindName('txtProcessors')
     $State.Controls.txtVMLocation = $window.FindName('txtVMLocation')
     $State.Controls.txtVMNamePrefix = $window.FindName('txtVMNamePrefix')
+    $State.Controls.cmbSystemPartitionDriveLetter = $window.FindName('cmbSystemPartitionDriveLetter')
+    $State.Controls.cmbWindowsPartitionDriveLetter = $window.FindName('cmbWindowsPartitionDriveLetter')
+    $State.Controls.cmbRecoveryPartitionDriveLetter = $window.FindName('cmbRecoveryPartitionDriveLetter')
     $State.Controls.cmbLogicalSectorSize = $window.FindName('cmbLogicalSectorSize')
     $State.Controls.txtProductKey = $window.FindName('txtProductKey')
     $State.Controls.txtOfficePath = $window.FindName('txtOfficePath')
@@ -445,6 +448,9 @@ function Initialize-UIDefaults {
     $State.Controls.txtProcessors.Text = $State.Defaults.generalDefaults.Processors
     $State.Controls.txtVMLocation.Text = $State.Defaults.generalDefaults.VMLocation
     $State.Controls.txtVMNamePrefix.Text = $State.Defaults.generalDefaults.VMNamePrefix
+    $State.Controls.cmbSystemPartitionDriveLetter.SelectedItem = ($State.Controls.cmbSystemPartitionDriveLetter.Items | Where-Object { $_.Content -eq $State.Defaults.generalDefaults.SystemPartitionDriveLetter })
+    $State.Controls.cmbWindowsPartitionDriveLetter.SelectedItem = ($State.Controls.cmbWindowsPartitionDriveLetter.Items | Where-Object { $_.Content -eq $State.Defaults.generalDefaults.WindowsPartitionDriveLetter })
+    $State.Controls.cmbRecoveryPartitionDriveLetter.SelectedItem = ($State.Controls.cmbRecoveryPartitionDriveLetter.Items | Where-Object { $_.Content -eq $State.Defaults.generalDefaults.RecoveryPartitionDriveLetter })
     $State.Controls.cmbLogicalSectorSize.SelectedItem = ($State.Controls.cmbLogicalSectorSize.Items | Where-Object { $_.Content -eq $State.Defaults.generalDefaults.LogicalSectorSize.ToString() })
    
     # Populate Windows Release, Version, and SKU comboboxes

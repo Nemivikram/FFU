@@ -339,6 +339,96 @@
                                     <!-- VM Name Prefix -->
                                     <TextBlock Text="VM Name Prefix" Margin="0,0,0,8" ToolTip="Prefix for the VM Name. The default is _FFU."/>
                                     <TextBox x:Name="txtVMNamePrefix" HorizontalAlignment="Stretch" Margin="0,0,0,20" ToolTip="Prefix for the VM Name. The default is _FFU."/>
+                                    <!-- System Partition Drive Letter -->
+                                    <TextBlock Text="System Partition Drive Letter" Margin="0,0,0,8" ToolTip="Drive letter used for the System partition while building the FFU VHDX. Default is S."/>
+                                    <ComboBox x:Name="cmbSystemPartitionDriveLetter" HorizontalAlignment="Left" Margin="0,0,0,20" ToolTip="Drive letter used for the System partition while building the FFU VHDX. Default is S.">
+                                        <ComboBoxItem Content="A"/>
+                                        <ComboBoxItem Content="B"/>
+                                        <ComboBoxItem Content="C"/>
+                                        <ComboBoxItem Content="D"/>
+                                        <ComboBoxItem Content="E"/>
+                                        <ComboBoxItem Content="F"/>
+                                        <ComboBoxItem Content="G"/>
+                                        <ComboBoxItem Content="H"/>
+                                        <ComboBoxItem Content="I"/>
+                                        <ComboBoxItem Content="J"/>
+                                        <ComboBoxItem Content="K"/>
+                                        <ComboBoxItem Content="L"/>
+                                        <ComboBoxItem Content="M"/>
+                                        <ComboBoxItem Content="N"/>
+                                        <ComboBoxItem Content="O"/>
+                                        <ComboBoxItem Content="P"/>
+                                        <ComboBoxItem Content="Q"/>
+                                        <ComboBoxItem Content="R"/>
+                                        <ComboBoxItem Content="S" IsSelected="True"/>
+                                        <ComboBoxItem Content="T"/>
+                                        <ComboBoxItem Content="U"/>
+                                        <ComboBoxItem Content="V"/>
+                                        <ComboBoxItem Content="W"/>
+                                        <ComboBoxItem Content="X"/>
+                                        <ComboBoxItem Content="Y"/>
+                                        <ComboBoxItem Content="Z"/>
+                                    </ComboBox>
+                                    <!-- Windows Partition Drive Letter -->
+                                    <TextBlock Text="Windows Partition Drive Letter" Margin="0,0,0,8" ToolTip="Drive letter used for the Windows partition while building the FFU VHDX. Default is W."/>
+                                    <ComboBox x:Name="cmbWindowsPartitionDriveLetter" HorizontalAlignment="Left" Margin="0,0,0,20" ToolTip="Drive letter used for the Windows partition while building the FFU VHDX. Default is W.">
+                                        <ComboBoxItem Content="A"/>
+                                        <ComboBoxItem Content="B"/>
+                                        <ComboBoxItem Content="C"/>
+                                        <ComboBoxItem Content="D"/>
+                                        <ComboBoxItem Content="E"/>
+                                        <ComboBoxItem Content="F"/>
+                                        <ComboBoxItem Content="G"/>
+                                        <ComboBoxItem Content="H"/>
+                                        <ComboBoxItem Content="I"/>
+                                        <ComboBoxItem Content="J"/>
+                                        <ComboBoxItem Content="K"/>
+                                        <ComboBoxItem Content="L"/>
+                                        <ComboBoxItem Content="M"/>
+                                        <ComboBoxItem Content="N"/>
+                                        <ComboBoxItem Content="O"/>
+                                        <ComboBoxItem Content="P"/>
+                                        <ComboBoxItem Content="Q"/>
+                                        <ComboBoxItem Content="R"/>
+                                        <ComboBoxItem Content="S"/>
+                                        <ComboBoxItem Content="T"/>
+                                        <ComboBoxItem Content="U"/>
+                                        <ComboBoxItem Content="V"/>
+                                        <ComboBoxItem Content="W" IsSelected="True"/>
+                                        <ComboBoxItem Content="X"/>
+                                        <ComboBoxItem Content="Y"/>
+                                        <ComboBoxItem Content="Z"/>
+                                    </ComboBox>
+                                    <!-- Recovery Partition Drive Letter -->
+                                    <TextBlock Text="Recovery Partition Drive Letter" Margin="0,0,0,8" ToolTip="Drive letter used for the Recovery partition while building the FFU VHDX. Default is R."/>
+                                    <ComboBox x:Name="cmbRecoveryPartitionDriveLetter" HorizontalAlignment="Left" Margin="0,0,0,20" ToolTip="Drive letter used for the Recovery partition while building the FFU VHDX. Default is R.">
+                                        <ComboBoxItem Content="A"/>
+                                        <ComboBoxItem Content="B"/>
+                                        <ComboBoxItem Content="C"/>
+                                        <ComboBoxItem Content="D"/>
+                                        <ComboBoxItem Content="E"/>
+                                        <ComboBoxItem Content="F"/>
+                                        <ComboBoxItem Content="G"/>
+                                        <ComboBoxItem Content="H"/>
+                                        <ComboBoxItem Content="I"/>
+                                        <ComboBoxItem Content="J"/>
+                                        <ComboBoxItem Content="K"/>
+                                        <ComboBoxItem Content="L"/>
+                                        <ComboBoxItem Content="M"/>
+                                        <ComboBoxItem Content="N"/>
+                                        <ComboBoxItem Content="O"/>
+                                        <ComboBoxItem Content="P"/>
+                                        <ComboBoxItem Content="Q"/>
+                                        <ComboBoxItem Content="R" IsSelected="True"/>
+                                        <ComboBoxItem Content="S"/>
+                                        <ComboBoxItem Content="T"/>
+                                        <ComboBoxItem Content="U"/>
+                                        <ComboBoxItem Content="V"/>
+                                        <ComboBoxItem Content="W"/>
+                                        <ComboBoxItem Content="X"/>
+                                        <ComboBoxItem Content="Y"/>
+                                        <ComboBoxItem Content="Z"/>
+                                    </ComboBox>
                                     <!-- Logical Sector Size -->
                                     <TextBlock Text="Logical Sector Size" Margin="0,0,0,8" ToolTip="Unit32 value of 512 or 4096. Useful for 4Kn drives or devices shipping with UFS drives. Default is 512."/>
                                     <ComboBox x:Name="cmbLogicalSectorSize" HorizontalAlignment="Left" ToolTip="Unit32 value of 512 or 4096. Useful for 4Kn drives or devices shipping with UFS drives. Default is 512.">

@@ -62,6 +62,9 @@ function Get-UIConfig {
         InstallWingetApps              = $State.Controls.chkInstallWingetApps.IsChecked
         ISOPath                        = $State.Controls.txtISOPath.Text
         WindowsMediaSource             = if ($null -ne $State.Controls.rbProvideISO -and $State.Controls.rbProvideISO.IsChecked) { "Provide Windows ISO" } else { "Download Windows ESD" }
+        SystemPartitionDriveLetter     = $State.Controls.cmbSystemPartitionDriveLetter.SelectedItem.Content
+        WindowsPartitionDriveLetter    = $State.Controls.cmbWindowsPartitionDriveLetter.SelectedItem.Content
+        RecoveryPartitionDriveLetter   = $State.Controls.cmbRecoveryPartitionDriveLetter.SelectedItem.Content
         LogicalSectorSizeBytes         = [int]$State.Controls.cmbLogicalSectorSize.SelectedItem.Content
         # Make                           = $null
         MediaType                      = $State.Controls.cmbMediaType.SelectedItem
@@ -523,6 +526,9 @@ function Update-UIFromConfig {
     Set-UIValue -ControlName 'txtProcessors' -PropertyName 'Text' -ConfigObject $ConfigContent -ConfigKey 'Processors' -State $State
     Set-UIValue -ControlName 'txtVMLocation' -PropertyName 'Text' -ConfigObject $ConfigContent -ConfigKey 'VMLocation' -State $State
     Set-UIValue -ControlName 'txtVMNamePrefix' -PropertyName 'Text' -ConfigObject $ConfigContent -ConfigKey 'FFUPrefix' -State $State
+    Set-UIValue -ControlName 'cmbSystemPartitionDriveLetter' -PropertyName 'SelectedItem' -ConfigObject $ConfigContent -ConfigKey 'SystemPartitionDriveLetter' -TransformValue { param($val) ([string]$val).Trim().TrimEnd(':').ToUpperInvariant() } -State $State
+    Set-UIValue -ControlName 'cmbWindowsPartitionDriveLetter' -PropertyName 'SelectedItem' -ConfigObject $ConfigContent -ConfigKey 'WindowsPartitionDriveLetter' -TransformValue { param($val) ([string]$val).Trim().TrimEnd(':').ToUpperInvariant() } -State $State
+    Set-UIValue -ControlName 'cmbRecoveryPartitionDriveLetter' -PropertyName 'SelectedItem' -ConfigObject $ConfigContent -ConfigKey 'RecoveryPartitionDriveLetter' -TransformValue { param($val) ([string]$val).Trim().TrimEnd(':').ToUpperInvariant() } -State $State
     Set-UIValue -ControlName 'cmbLogicalSectorSize' -PropertyName 'SelectedItem' -ConfigObject $ConfigContent -ConfigKey 'LogicalSectorSizeBytes' -TransformValue { param($val) $val.ToString() } -State $State
     $State.Controls.spVMNetworkingSettings.IsEnabled = $true -eq $State.Controls.chkEnableVMNetworking.IsChecked
     if (-not ($true -eq $State.Controls.chkEnableVMNetworking.IsChecked)) {

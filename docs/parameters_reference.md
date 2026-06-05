@@ -75,10 +75,12 @@ This table lists all top-level parameters in BuildFFUVM.ps1.
 | -Processors | int | Processors | Number of virtual processors for the virtual machine. Recommended to use at least 4. |
 | -ProductKey | string | Product Key | Product key for the Windows edition specified in WindowsSKU. This will overwrite whatever SKU is entered for WindowsSKU. Recommended to use if you want to use a MAK or KMS key to activate Enterprise or Education. If using VL media instead of consumer media, you'll want to enter a MAK or KMS key here. |
 | -PromptExternalHardDiskMedia | bool | Prompt for External Hard Disk Media | When set to $true, will prompt the user to confirm the use of media identified as External Hard Disk media via WMI class Win32_DiskDrive. Default is $true. |
+| -RecoveryPartitionDriveLetter | string | Recovery Partition Drive Letter | Drive letter used for the Recovery partition while building the FFU VHDX. Default is R. |
 | -RemoveApps | bool | Remove Apps Folder Content | When set to $true, will remove the application content in the Apps folder after the FFU has been captured. Default is $true. |
 | -RemoveDownloadedESD | bool | Remove Downloaded ESD file(s) | When set to $true, downloaded Windows ESD files are automatically deleted after they have been applied. Default is $true. |
 | -RemoveFFU | bool | Remove FFU | When set to $true, will remove the FFU file from the $FFUDevelopmentPath\FFU folder after it has been copied to the USB drive. Default is $false. |
 | -RemoveUpdates | bool | Remove Downloaded Update Files | When set to $true, will remove the downloaded CU, MSRT, Defender, Edge, OneDrive, and .NET files downloaded. Default is $true. |
+| -SystemPartitionDriveLetter | string | System Partition Drive Letter | Drive letter used for the System partition while building the FFU VHDX. Default is S. |
 | -Threads | int | Threads | Controls the throttle applied to parallel tasks inside the script. Default is 5, matching the UI Threads field, and applies to driver downloads invoked through Invoke-ParallelProcessing. |
 | -UnattendArm64FilePath | string | arm64 Unattend File Path | Path to the arm64 unattend XML source file used by Copy Unattend.xml and Inject Unattend.xml. Default is $FFUDevelopmentPath\Unattend\unattend_arm64.xml. |
 | -UnattendX64FilePath | string | x64 Unattend File Path | Path to the x64 unattend XML source file used by Copy Unattend.xml and Inject Unattend.xml. Default is $FFUDevelopmentPath\Unattend\unattend_x64.xml. |
@@ -98,6 +100,7 @@ This table lists all top-level parameters in BuildFFUVM.ps1.
 | -VMLocation | string | VM Location | Default is $FFUDevelopmentPath\VM. This is the location of the VHDX that gets created where Windows will be installed to. |
 | -VMSwitchName | string | VM Switch Name + Custom VM Switch Name (when Other selected) | Name of the Hyper-V virtual switch used when -EnableVMNetworking is set to $true. |
 | -WindowsArch | string | Windows Architecture | String value of 'x86', 'x64', or 'arm64'. This is used to identify which architecture of Windows to download. Default is 'x64'. |
+| -WindowsPartitionDriveLetter | string | Windows Partition Drive Letter | Drive letter used for the Windows partition while building the FFU VHDX. Default is W. |
 | -WindowsLang | string | Windows Language | String value in language-region format (e.g., 'en-us'). This is used to identify which language of media to download. Default is 'en-us'. |
 | -WindowsRelease | int | Windows Release | Integer value of 10, 11, 2016, 2019, 2021, 2022, 2024, or 2025. This is used to identify which Windows client/LTSC/server release to use. Default is 11. |
 | -WindowsSKU | string | Windows SKU | Edition/SKU to install. Accepted values are: 'Home', 'Home N', 'Home Single Language', 'Education', 'Education N', 'Pro', 'Pro N', 'Pro Education', 'Pro Education N', 'Pro for Workstations', 'Pro N for Workstations', 'Enterprise', 'Enterprise N', 'Enterprise 2016 LTSB', 'Enterprise N 2016 LTSB', 'Enterprise LTSC', 'Enterprise N LTSC', 'IoT Enterprise LTSC', 'IoT Enterprise N LTSC', 'Standard', 'Standard (Desktop Experience)', 'Datacenter', 'Datacenter (Desktop Experience)'. |

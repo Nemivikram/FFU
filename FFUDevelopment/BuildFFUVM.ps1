@@ -147,6 +147,15 @@ Path to the Windows 10/11 ISO file.
 .PARAMETER LogicalSectorSizeBytes
 UInt32 value of 512 or 4096. Useful for 4Kn drives or devices shipping with UFS drives. Default is 512.
 
+.PARAMETER SystemPartitionDriveLetter
+Drive letter used for the System partition while building the FFU VHDX. Default is S.
+
+.PARAMETER WindowsPartitionDriveLetter
+Drive letter used for the Windows partition while building the FFU VHDX. Default is W.
+
+.PARAMETER RecoveryPartitionDriveLetter
+Drive letter used for the Recovery partition while building the FFU VHDX. Default is R.
+
 .PARAMETER Make
 Make of the device to download drivers. Accepted values are: 'Microsoft', 'Dell', 'HP', 'Lenovo'.
 
@@ -411,6 +420,9 @@ param(
     [string]$MediaType = 'consumer',
     [ValidateSet(512, 4096)]
     [uint32]$LogicalSectorSizeBytes = 512,
+    [string]$SystemPartitionDriveLetter = 'S',
+    [string]$WindowsPartitionDriveLetter = 'W',
+    [string]$RecoveryPartitionDriveLetter = 'R',
     [bool]$Optimize = $true,
     [string]$DriversJsonPath,
     [bool]$CompressDownloadedDriversToWim = $false,
@@ -866,6 +878,9 @@ class VhdxCacheItem {
     [string]$VhdxFileName = ""
     [uint32]$LogicalSectorSizeBytes = ""
     [uint64]$Disksize = ""
+    [string]$SystemPartitionDriveLetter = ""
+    [string]$WindowsPartitionDriveLetter = ""
+    [string]$RecoveryPartitionDriveLetter = ""
     [string]$WindowsSKU = ""
     [string]$WindowsRelease = ""
     [string]$WindowsVersion = ""
@@ -3048,21 +3063,80 @@ function New-ScratchVhdx {
     Writelog "Done."
     return $toReturn
 }
+function Get-NormalizedPartitionDriveLetters {
+    param(
+        [string]$SystemPartitionDriveLetter,
+        [string]$WindowsPartitionDriveLetter,
+        [string]$RecoveryPartitionDriveLetter,
+        [switch]$ValidateAvailable
+    )
+
+    $requestedLetters = [ordered]@{
+        SystemPartitionDriveLetter   = $SystemPartitionDriveLetter
+        WindowsPartitionDriveLetter  = $WindowsPartitionDriveLetter
+        RecoveryPartitionDriveLetter = $RecoveryPartitionDriveLetter
+    }
+    $normalizedLetters = [ordered]@{}
+
+    foreach ($entry in $requestedLetters.GetEnumerator()) {
+        $driveLetter = ([string]$entry.Value).Trim().TrimEnd(':').ToUpperInvariant()
+        if ([string]::IsNullOrWhiteSpace($driveLetter) -or $driveLetter -notmatch '^[A-Z]$') {
+            throw "$($entry.Key) must be a single drive letter from A to Z without a colon."
+        }
+
+        $normalizedLetters[$entry.Key] = $driveLetter
+    }
+
+    $duplicateLetters = @($normalizedLetters.Values | Group-Object | Where-Object { $_.Count -gt 1 })
+    if ($duplicateLetters.Count -gt 0) {
+        $duplicateLetterList = ($duplicateLetters | ForEach-Object { $_.Name }) -join ', '
+        throw "System, Windows, and Recovery partition drive letters must be unique. Duplicate value(s): $duplicateLetterList."
+    }
+
+    if ($ValidateAvailable) {
+        foreach ($entry in $normalizedLetters.GetEnumerator()) {
+            $existingDrive = Get-PSDrive -Name $entry.Value -PSProvider FileSystem -ErrorAction SilentlyContinue
+            if ($null -ne $existingDrive) {
+                throw "$($entry.Key) uses drive letter $($entry.Value), but that letter is already assigned on this host. Choose an unused drive letter."
+            }
+        }
+    }
+
+    return [pscustomobject]$normalizedLetters
+}
+function Get-PartitionDriveLetterCacheValue {
+    param(
+        [object]$DriveLetterValue
+    )
+
+    $driveLetter = ([string]$DriveLetterValue).Trim().TrimEnd(':').ToUpperInvariant()
+    if ($driveLetter -match '^[A-Z]$') {
+        return $driveLetter
+    }
+
+    $trailingDriveLetter = [regex]::Match($driveLetter, '(?i)(?:^|[^A-Z])([A-Z])$')
+    if ($trailingDriveLetter.Success) {
+        return $trailingDriveLetter.Groups[1].Value.ToUpperInvariant()
+    }
+
+    return $driveLetter
+}
 #Add System Partition
 function New-SystemPartition {
     param(
         [Parameter(Mandatory = $true)]
         [ciminstance]$VhdxDisk,
+        [string]$DriveLetter = 'S',
         [uint64]$SystemPartitionSize = 260MB
     )
 
     WriteLog "Creating System partition..."
 
-    $sysPartition = $VhdxDisk | New-Partition -DriveLetter 'S' -Size $SystemPartitionSize -GptType "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}" -IsHidden 
-    $sysPartition | Format-Volume -FileSystem FAT32 -Force -NewFileSystemLabel "System" 
+    $sysPartition = $VhdxDisk | New-Partition -DriveLetter $DriveLetter -Size $SystemPartitionSize -GptType "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}" -IsHidden 
+    $sysPartition | Format-Volume -FileSystem FAT32 -Force -NewFileSystemLabel "System" | Out-Null
 
     WriteLog 'Done.'
-    return $sysPartition.DriveLetter
+    return [string]$sysPartition.DriveLetter
 }
 #Add MSRPartition
 function New-MSRPartition {
@@ -3088,16 +3162,17 @@ function New-OSPartition {
         [Parameter(Mandatory = $true)]
         [string]$WimPath,
         [uint32]$WimIndex,
+        [string]$DriveLetter = 'W',
         [uint64]$OSPartitionSize = 0
     )
 
     WriteLog "Creating OS partition..."
 
     if ($OSPartitionSize -gt 0) {
-        $osPartition = $vhdxDisk | New-Partition -DriveLetter 'W' -Size $OSPartitionSize -GptType "{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}" 
+        $osPartition = $vhdxDisk | New-Partition -DriveLetter $DriveLetter -Size $OSPartitionSize -GptType "{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}" 
     }
     else {
-        $osPartition = $vhdxDisk | New-Partition -DriveLetter 'W' -UseMaximumSize -GptType "{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}" 
+        $osPartition = $vhdxDisk | New-Partition -DriveLetter $DriveLetter -UseMaximumSize -GptType "{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}" 
     }
 
     $osPartition | Format-Volume -FileSystem NTFS -Confirm:$false -Force -NewFileSystemLabel "Windows" 
@@ -3129,6 +3204,7 @@ function New-RecoveryPartition {
         [Parameter(Mandatory = $true)]
         $OsPartition,
         [uint64]$RecoveryPartitionSize = 0,
+        [string]$DriveLetter = 'R',
         [ciminstance]$DataPartition
     )
 
@@ -3163,7 +3239,7 @@ function New-RecoveryPartition {
                 WriteLog "OS partition shrunk by $calculatedRecoverySize bytes for Recovery partition."
             }
 
-            $recoveryPartition = $VhdxDisk | New-Partition -DriveLetter 'R' -UseMaximumSize -GptType "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}" `
+            $recoveryPartition = $VhdxDisk | New-Partition -DriveLetter $DriveLetter -UseMaximumSize -GptType "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}" `
             | Format-Volume -FileSystem NTFS -Confirm:$false -Force -NewFileSystemLabel 'Recovery' 
 
             WriteLog "Done. Recovery partition at drive $($recoveryPartition.DriveLetter):"
@@ -5877,7 +5953,6 @@ if ($ExportConfigFile) {
 
 ####### End Generate Config File #######
 
-
 #Setting long path support - this prevents issues where some applications have deep directory structures
 #and oscdimg fails to create the Apps ISO
 try {
@@ -5895,6 +5970,21 @@ if ($LongPathsEnabled -ne 1) {
 
 Set-Progress -Percentage 2 -Message "Validating parameters..."
 ###PARAMETER VALIDATION
+
+#Set build partition drive letters and validate they are available for use; this is required before any build steps that require drive access to ensure the expected drive letters are reserved and to fail fast if there are conflicts.
+try {
+    $partitionDriveLetters = Get-NormalizedPartitionDriveLetters -SystemPartitionDriveLetter $SystemPartitionDriveLetter -WindowsPartitionDriveLetter $WindowsPartitionDriveLetter -RecoveryPartitionDriveLetter $RecoveryPartitionDriveLetter -ValidateAvailable
+    $SystemPartitionDriveLetter = $partitionDriveLetters.SystemPartitionDriveLetter
+    $WindowsPartitionDriveLetter = $partitionDriveLetters.WindowsPartitionDriveLetter
+    $RecoveryPartitionDriveLetter = $partitionDriveLetters.RecoveryPartitionDriveLetter
+    WriteLog "Using build partition drive letters: System=$SystemPartitionDriveLetter, Windows=$WindowsPartitionDriveLetter, Recovery=$RecoveryPartitionDriveLetter"
+}
+catch {
+    $partitionDriveLetterValidationError = "Build validation failed: $($_.Exception.Message)"
+    Set-Progress -Percentage 2 -Message $partitionDriveLetterValidationError
+    WriteLog $partitionDriveLetterValidationError
+    throw $partitionDriveLetterValidationError
+}
 
 #Validate CopyDrivers dependency on BuildUSBDrive
 if ($CopyDrivers -and (-not $BuildUSBDrive)) {
@@ -7187,6 +7277,15 @@ try {
                     [uint64]$cachedDisksize = 0
                     if (-not [uint64]::TryParse([string]$vhdxCacheItem.Disksize, [ref]$cachedDisksize)) { WriteLog "Disksize invalid in cached config ($($vhdxCacheItem.Disksize)), continuing"; continue }
                     if ($cachedDisksize -ne $Disksize) { WriteLog "Disksize mismatch (cached: $cachedDisksize, current: $Disksize), continuing"; continue }
+                    if ($vhdxCacheItem.PSObject.Properties.Name -notcontains 'SystemPartitionDriveLetter') { WriteLog 'SystemPartitionDriveLetter missing in cached config, continuing'; continue }
+                    if ($vhdxCacheItem.PSObject.Properties.Name -notcontains 'WindowsPartitionDriveLetter') { WriteLog 'WindowsPartitionDriveLetter missing in cached config, continuing'; continue }
+                    if ($vhdxCacheItem.PSObject.Properties.Name -notcontains 'RecoveryPartitionDriveLetter') { WriteLog 'RecoveryPartitionDriveLetter missing in cached config, continuing'; continue }
+                    $cachedSystemPartitionDriveLetter = Get-PartitionDriveLetterCacheValue -DriveLetterValue $vhdxCacheItem.SystemPartitionDriveLetter
+                    $cachedWindowsPartitionDriveLetter = Get-PartitionDriveLetterCacheValue -DriveLetterValue $vhdxCacheItem.WindowsPartitionDriveLetter
+                    $cachedRecoveryPartitionDriveLetter = Get-PartitionDriveLetterCacheValue -DriveLetterValue $vhdxCacheItem.RecoveryPartitionDriveLetter
+                    if ($cachedSystemPartitionDriveLetter -ne $SystemPartitionDriveLetter) { WriteLog "SystemPartitionDriveLetter mismatch (cached: $($vhdxCacheItem.SystemPartitionDriveLetter), current: $SystemPartitionDriveLetter), continuing"; continue }
+                    if ($cachedWindowsPartitionDriveLetter -ne $WindowsPartitionDriveLetter) { WriteLog "WindowsPartitionDriveLetter mismatch (cached: $($vhdxCacheItem.WindowsPartitionDriveLetter), current: $WindowsPartitionDriveLetter), continuing"; continue }
+                    if ($cachedRecoveryPartitionDriveLetter -ne $RecoveryPartitionDriveLetter) { WriteLog "RecoveryPartitionDriveLetter mismatch (cached: $($vhdxCacheItem.RecoveryPartitionDriveLetter), current: $RecoveryPartitionDriveLetter), continuing"; continue }
 
                     $cachedUpdateNames = @()
                     if ($vhdxCacheItem.IncludedUpdates -and $vhdxCacheItem.IncludedUpdates.Count -gt 0) {
@@ -7504,21 +7603,21 @@ try {
 
         $vhdxDisk = New-ScratchVhdx -VhdxPath $VHDXPath -SizeBytes $disksize -LogicalSectorSizeBytes $LogicalSectorSizeBytes
 
-        $systemPartitionDriveLetter = New-SystemPartition -VhdxDisk $vhdxDisk
+        $createdSystemPartitionDriveLetter = New-SystemPartition -VhdxDisk $vhdxDisk -DriveLetter $SystemPartitionDriveLetter
     
         New-MSRPartition -VhdxDisk $vhdxDisk
     
         Set-Progress -Percentage 16 -Message "Applying base Windows image to VHDX..."
-        $osPartition = New-OSPartition -VhdxDisk $vhdxDisk -OSPartitionSize $OSPartitionSize -WimPath $WimPath -WimIndex $index
+        $osPartition = New-OSPartition -VhdxDisk $vhdxDisk -OSPartitionSize $OSPartitionSize -WimPath $WimPath -WimIndex $index -DriveLetter $WindowsPartitionDriveLetter
         $osPartitionDriveLetter = $osPartition[1].DriveLetter
         $WindowsPartition = $osPartitionDriveLetter + ':\'
 
         #$recoveryPartition = New-RecoveryPartition -VhdxDisk $vhdxDisk -OsPartition $osPartition[1] -RecoveryPartitionSize $RecoveryPartitionSize -DataPartition $dataPartition
-        $recoveryPartition = New-RecoveryPartition -VhdxDisk $vhdxDisk -OsPartition $osPartition[1] -RecoveryPartitionSize $RecoveryPartitionSize -DataPartition $dataPartition
+        $recoveryPartition = New-RecoveryPartition -VhdxDisk $vhdxDisk -OsPartition $osPartition[1] -RecoveryPartitionSize $RecoveryPartitionSize -DriveLetter $RecoveryPartitionDriveLetter -DataPartition $dataPartition
 
         WriteLog 'All necessary partitions created.'
 
-        Add-BootFiles -OsPartitionDriveLetter $osPartitionDriveLetter -SystemPartitionDriveLetter $systemPartitionDriveLetter[1] -AdkPath $adkPath -WindowsArch $WindowsArch
+        Add-BootFiles -OsPartitionDriveLetter $osPartitionDriveLetter -SystemPartitionDriveLetter $createdSystemPartitionDriveLetter -AdkPath $adkPath -WindowsArch $WindowsArch
     
         #Add Windows packages
         if ($UpdateLatestCU -or $UpdateLatestNet -or $UpdatePreviewCU ) {
@@ -7689,6 +7788,9 @@ try {
         $cachedVHDXInfo.VhdxFileName = $("$VMName.vhdx")
         $cachedVHDXInfo.LogicalSectorSizeBytes = $LogicalSectorSizeBytes
         $cachedVHDXInfo.Disksize = $Disksize
+        $cachedVHDXInfo.SystemPartitionDriveLetter = [string]$SystemPartitionDriveLetter
+        $cachedVHDXInfo.WindowsPartitionDriveLetter = [string]$WindowsPartitionDriveLetter
+        $cachedVHDXInfo.RecoveryPartitionDriveLetter = [string]$RecoveryPartitionDriveLetter
         $cachedVHDXInfo.WindowsSKU = $WindowsSKU
         $cachedVHDXInfo.WindowsRelease = $WindowsRelease
         $cachedVHDXInfo.WindowsVersion = $WindowsVersion

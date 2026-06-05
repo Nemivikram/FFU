@@ -26,6 +26,26 @@ function Compare-DellVendorVersion {
     return 0
 }
 
+function Test-DellDriverComponentOsArch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][System.Xml.XmlElement]$Component,
+        [Parameter(Mandatory=$true)][ValidateSet('x64', 'x86', 'ARM64')][string]$WindowsArch
+    )
+
+    $deviceGroupOsNodes = @($Component.SelectNodes("*[local-name()='DeviceGroup']/*[local-name()='OperatingSystem']"))
+    if ($deviceGroupOsNodes.Count -gt 0) {
+        $validDeviceGroupOs = $deviceGroupOsNodes | Where-Object { $_.GetAttribute('osArch') -eq $WindowsArch } | Select-Object -First 1
+        return $null -ne $validDeviceGroupOs
+    }
+
+    $supportedOsNodes = @($Component.SelectNodes("*[local-name()='SupportedOperatingSystems']/*[local-name()='OperatingSystem']"))
+    if ($supportedOsNodes.Count -eq 0) { return $false }
+
+    $validSupportedOs = $supportedOsNodes | Where-Object { $_.GetAttribute('osArch') -eq $WindowsArch } | Select-Object -First 1
+    return $null -ne $validSupportedOs
+}
+
 function Get-DellCatalogIndex {
     [CmdletBinding()]
     param(
@@ -155,10 +175,7 @@ function Get-DellLatestDriverPackages {
         if ($ctype.GetAttribute('value') -ne 'DRVR') { continue }
 
         # OS filtering (arch only – release filtering intentionally minimal for now)
-        $osNodes = @($comp.SelectNodes("*[local-name()='SupportedOperatingSystems']/*[local-name()='OperatingSystem']"))
-        if (-not $osNodes) { continue }
-        $validOS = $osNodes | Where-Object { $_.GetAttribute('osArch') -eq $WindowsArch } | Select-Object -First 1
-        if (-not $validOS) { continue }
+        if (-not (Test-DellDriverComponentOsArch -Component $comp -WindowsArch $WindowsArch)) { continue }
 
         $path = $comp.GetAttribute('path')
         if (-not $path) { continue }

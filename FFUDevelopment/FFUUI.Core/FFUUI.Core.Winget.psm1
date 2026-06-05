@@ -233,44 +233,6 @@ function Search-WingetPackagesPublic {
     }
 }
 
-function Test-WingetCLI {
-    [CmdletBinding()]
-    param()
-    
-    $minVersion = [version]"1.8.1911"
-    
-    # Check Winget CLI
-    $wingetCmd = Get-Command -Name winget -ErrorAction SilentlyContinue
-    if (-not $wingetCmd) {
-        return @{
-            Version = "Not installed"
-            Status  = "Not installed - Install from Microsoft Store"
-        }
-    }
-    
-    # Get and check version
-    $wingetVersion = & winget.exe --version
-    if ($wingetVersion -match 'v?(\d+\.\d+.\d+)') {
-        $version = [version]$matches[1]
-        if ($version -lt $minVersion) {
-            return @{
-                Version = $version.ToString()
-                Status  = "Update required - Install from Microsoft Store"
-            }
-        }
-        return @{
-            Version = $version.ToString()
-            Status  = $version.ToString()
-        }
-    }
-    
-    return @{
-        Version = "Unknown"
-        Status  = "Version check failed"
-    }
-}
-
-
 function Install-WingetComponents {
     [CmdletBinding()]
     param(
@@ -339,19 +301,22 @@ function Confirm-WingetInstallationUI {
     try {
         # Initial Check
         WriteLog "Confirm-WingetInstallationUI: Starting checks..."
-        $cliStatus = Test-WingetCLI
-        $module = @(Get-InstalledModule -Name Microsoft.WinGet.Client -ErrorAction SilentlyContinue) | Sort-Object -Top 1 -Descending Version -ErrorAction SilentlyContinue
+        $wingetStatus = Get-WinGetComponentStatus -MinimumVersion $minVersion
 
-        $result.CliVersion = $cliStatus.Version
-        $result.ModuleVersion = if ($null -ne $module) { $module.Version.ToString() } else { "Not installed" }
+        $result.CliVersion = $wingetStatus.WinGetVersion
+        $result.ModuleVersion = $wingetStatus.ModuleVersion
 
         # Use callback for initial status display
         & $UiUpdateCallback $result.CliVersion $result.ModuleVersion
 
         # Determine if install/update is needed
-        $needsCliUpdate = $cliStatus.Status -notmatch '^\d+\.\d+\.\d+$' -or ([version]$cliStatus.Version -lt $minVersion)
-        $needsModuleUpdate = ($null -eq $module) -or ([version]$module.Version -lt $minVersion)
-        $result.NeedsUpdate = $needsCliUpdate -or $needsModuleUpdate
+        $needsCliUpdate = $wingetStatus.WinGetNeedsUpdate
+        $needsModuleUpdate = $wingetStatus.ModuleNeedsUpdate
+        $result.NeedsUpdate = $wingetStatus.NeedsUpdate
+
+        if (-not [string]::IsNullOrWhiteSpace($wingetStatus.ErrorMessage)) {
+            WriteLog "Confirm-WingetInstallationUI: WinGet status error - $($wingetStatus.ErrorMessage)"
+        }
 
         if ($result.NeedsUpdate) {
             WriteLog "Confirm-WingetInstallationUI: Update needed. CLI Needs Update: $needsCliUpdate, Module Needs Update: $needsModuleUpdate"
@@ -361,21 +326,29 @@ function Confirm-WingetInstallationUI {
             & $UiUpdateCallback $result.CliVersion "Installing/Updating..."
 
             # Attempt to install/update Winget CLI and module
-            $installedModule = Install-WingetComponents -UiUpdateCallback $UiUpdateCallback
+            Install-WingetComponents -UiUpdateCallback $UiUpdateCallback | Out-Null
             
             # Re-check status after attempt
             WriteLog "Confirm-WingetInstallationUI: Re-checking status after update attempt..."
-            $cliStatus = Test-WingetCLI
-            $result.CliVersion = $cliStatus.Version
-            $result.ModuleVersion = if ($null -ne $installedModule) { $installedModule.Version } else { "Install Failed" }
+            $wingetStatus = Get-WinGetComponentStatus -MinimumVersion $minVersion
+            $result.CliVersion = $wingetStatus.WinGetVersion
+            $result.ModuleVersion = $wingetStatus.ModuleVersion
             # Use callback for final status display after update attempt
             & $UiUpdateCallback $result.CliVersion $result.ModuleVersion
 
             # Check if update was successful
-            $cliOk = $cliStatus.Status -match '^\d+\.\d+\.\d+$' -and ([version]$cliStatus.Version -ge $minVersion)
-            $moduleOk = ($null -ne $installedModule) -and ([version]$installedModule.Version -ge $minVersion)
-            $result.Success = $cliOk -and $moduleOk
-            $result.Message = if ($result.Success) { "Winget components installed/updated successfully." } else { "Winget component installation/update failed or is incomplete." }
+            $cliOk = $wingetStatus.WinGetInstalled -and -not $wingetStatus.WinGetNeedsUpdate
+            $moduleOk = $wingetStatus.ModuleInstalled -and -not $wingetStatus.ModuleNeedsUpdate
+            $result.Success = $cliOk -and $moduleOk -and [string]::IsNullOrWhiteSpace($wingetStatus.ErrorMessage)
+            $result.Message = if ($result.Success) {
+                "Winget components installed/updated successfully."
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace($wingetStatus.ErrorMessage)) {
+                "Winget component installation/update failed: $($wingetStatus.ErrorMessage)"
+            }
+            else {
+                "Winget component installation/update failed or is incomplete."
+            }
             WriteLog "Confirm-WingetInstallationUI: Update attempt finished. Success: $($result.Success). Message: $($result.Message)"
         }
         else {

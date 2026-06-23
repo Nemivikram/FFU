@@ -1317,8 +1317,8 @@ function Add-Win32DependencySilentInstallCommands {
         return 5
     }
     
-    # Build the VM install base path for dependency payloads (matches D:\win32 layout)
-    $vmBasePath = "D:\win32\$ParentAppName"
+    # Build the VM install base path for dependency payloads on the Apps media.
+    $vmBasePath = "%FFUAppsRoot%\win32\$ParentAppName"
     if (-not [string]::IsNullOrEmpty($SubFolder)) {
         $vmBasePath = "$vmBasePath\$SubFolder"
     }
@@ -1532,13 +1532,13 @@ function Add-Win32SilentInstallCommand {
         }
     }
     
-    # Build the VM install base path (matches D:\win32 layout)
+    # Build the VM install base path on the Apps media.
     $basePath = $null
     if (-not [string]::IsNullOrWhiteSpace($BasePathOverride)) {
         $basePath = $BasePathOverride
     }
     else {
-        $basePath = "D:\win32\$AppFolder"
+        $basePath = "%FFUAppsRoot%\win32\$AppFolder"
         if (-not [string]::IsNullOrEmpty($SubFolder)) {
             $basePath = "$basePath\$SubFolder"
         }

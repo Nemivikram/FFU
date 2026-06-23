@@ -27,6 +27,51 @@ Write-Host "---------------------------------------------------" -ForegroundColo
 
 # Define the path to the scripts
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$appsMediaRoot = Split-Path -Parent $scriptPath
+if ([string]::IsNullOrWhiteSpace([string]$env:FFUAppsRoot)) {
+    $env:FFUAppsRoot = $appsMediaRoot
+}
+else {
+    $env:FFUAppsRoot = ([string]$env:FFUAppsRoot).Trim().TrimEnd('\')
+}
+Write-Host "Using Apps media root: $env:FFUAppsRoot"
+
+function Resolve-AppsMediaPath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $appsRoot = ([string]$env:FFUAppsRoot).Trim().TrimEnd('\')
+    if (-not [string]::IsNullOrWhiteSpace($appsRoot)) {
+        $tokenPattern = '%FFUAppsRoot%|\$\{?env:FFUAppsRoot\}?|\{FFUAppsRoot\}'
+        $regexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+        $Path = [regex]::Replace($Path, $tokenPattern, [System.Text.RegularExpressions.MatchEvaluator] { param($match) $appsRoot }, $regexOptions)
+    }
+
+    if ($Path -notmatch '^(?i)d:\\') {
+        return $Path
+    }
+
+    if ([string]::IsNullOrWhiteSpace($appsRoot)) {
+        return $Path
+    }
+
+    $candidatePath = Join-Path -Path $appsRoot -ChildPath $Path.Substring(3)
+    if (Test-Path -Path $Path) {
+        if (Test-Path -Path $candidatePath) {
+            Write-Warning "Both legacy Apps path '$Path' and Apps media path '$candidatePath' exist. Keeping literal path."
+        }
+        return $Path
+    }
+
+    if (Test-Path -Path $candidatePath) {
+        Write-Host "Remapped legacy Apps path '$Path' to '$candidatePath'."
+        return $candidatePath
+    }
+
+    return $Path
+}
 
 # Resolve the configured BYO app list path for runtime orchestration.
 $appInstallConfigPath = Join-Path -Path $scriptPath -ChildPath "AppInstallConfig.json"
@@ -36,7 +81,7 @@ if (Test-Path -Path $appInstallConfigPath) {
     try {
         $appInstallConfig = Get-Content -Path $appInstallConfigPath -Raw | ConvertFrom-Json
         if ($null -ne $appInstallConfig -and $appInstallConfig.PSObject.Properties.Match('UserAppListPath').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($appInstallConfig.UserAppListPath)) {
-            $userAppsJsonFile = $appInstallConfig.UserAppListPath
+            $userAppsJsonFile = Resolve-AppsMediaPath -Path $appInstallConfig.UserAppListPath
             Write-Host "Using BYO app list path from AppInstallConfig.json: $userAppsJsonFile"
         }
     }
@@ -73,7 +118,7 @@ foreach ($script in $scriptList) {
             }
         }
         "Install-StoreApps.ps1" {
-            $msStorePath = "D:\MSStore"
+            $msStorePath = Join-Path -Path $env:FFUAppsRoot -ChildPath "MSStore"
             if (-not (Test-Path -Path $msStorePath) -or -not (Get-ChildItem -Path $msStorePath)) {
                 $shouldRun = $false
             }
@@ -88,6 +133,9 @@ foreach ($script in $scriptList) {
         # Run script and wait for it to finish.
         if ($script -eq "Install-Win32Apps.ps1") {
             & $scriptFile -UserAppsJsonFile $userAppsJsonFile
+        }
+        elseif ($script -eq "Install-StoreApps.ps1") {
+            & $scriptFile -BasePath (Join-Path -Path $env:FFUAppsRoot -ChildPath "MSStore")
         }
         else {
             & $scriptFile

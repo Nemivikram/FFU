@@ -105,6 +105,15 @@ Sets a custom FFU output name with placeholders. Allowed placeholders are: {Wind
 .PARAMETER Disksize
 Size of the virtual hard disk for the virtual machine. Default is a 50GB dynamic disk.
 
+.PARAMETER OSPartitionSize
+Fixed size of the Windows partition in bytes. Required when AdditionalDataPartitions are configured so space remains for Recovery and data partitions.
+
+.PARAMETER RecoveryPartitionSize
+Optional fixed size of the Recovery partition in bytes. Leave as 0 to calculate the Recovery partition size from winre.wim plus buffer space.
+
+.PARAMETER AdditionalDataPartitions
+Optional data partitions to create after the Recovery partition. Each item supports Name, Label, DriveLetter, SizeBytes or SizeGB, FillRemaining, and FileSystem.
+
 .PARAMETER DriversFolder
 Path to the drivers folder. Default is $FFUDevelopmentPath\Drivers.
 
@@ -176,6 +185,9 @@ Path to a custom Office configuration XML file to use for installation.
 
 .PARAMETER Optimize
 When set to $true, will optimize the FFU file. Default is $true.
+
+.PARAMETER OptimizeFFUPartitionNumber
+Optional partition number to pass to DISM /Optimize-FFU /PartitionNumber. Leave as 0 to optimize with DISM defaults.
 
 .PARAMETER OptionalFeatures
 Provide a semicolon-separated list of Windows optional features you want to include in the FFU (e.g., netfx3;TFTP).
@@ -352,6 +364,9 @@ param(
     [bool]$InstallDrivers,
     [uint64]$Memory = 4GB,
     [uint64]$Disksize = 50GB,
+    [uint64]$OSPartitionSize = 0,
+    [uint64]$RecoveryPartitionSize = 0,
+    [object[]]$AdditionalDataPartitions = @(),
     [int]$Processors = 4,
     [bool]$EnableVMNetworking,
     [string]$VMSwitchName,
@@ -424,6 +439,7 @@ param(
     [string]$WindowsPartitionDriveLetter = 'W',
     [string]$RecoveryPartitionDriveLetter = 'R',
     [bool]$Optimize = $true,
+    [int]$OptimizeFFUPartitionNumber = 0,
     [string]$DriversJsonPath,
     [bool]$CompressDownloadedDriversToWim = $false,
     [bool]$CopyDrivers,
@@ -521,14 +537,18 @@ if ($ConfigFile -and (Test-Path -Path $ConfigFile)) {
     # Iterate through the keys in the config data
     foreach ($key in $keys) {
         $value = $configdata.$key
+
+        $valueIsEmptyString = ($value -is [string]) -and [string]::IsNullOrEmpty($value)
+        $valueIsEmptyArray = ($value -is [System.Array]) -and ($value.Count -eq 0)
+        $valueIsEmptyHashtable = ($value -is [System.Collections.Hashtable]) -and ($value.Count -eq 0)
+        $valueIsZero = (($value -is [System.UInt32]) -or ($value -is [System.UInt64]) -or ($value -is [System.Int32])) -and ($value -eq 0)
         
         # If $value is empty, skip
         if ($null -eq $value -or 
-            ([string]::IsNullOrEmpty([string]$value)) -or 
-            ($value -is [System.Collections.Hashtable] -and $value.Count -eq 0) -or 
-            ($value -is [System.UInt32] -and $value -eq 0) -or 
-            ($value -is [System.UInt64] -and $value -eq 0) -or 
-            ($value -is [System.Int32] -and $value -eq 0)) {
+            $valueIsEmptyString -or 
+            $valueIsEmptyArray -or 
+            $valueIsEmptyHashtable -or 
+            $valueIsZero) {
             continue
         }
 
@@ -881,6 +901,7 @@ class VhdxCacheItem {
     [string]$SystemPartitionDriveLetter = ""
     [string]$WindowsPartitionDriveLetter = ""
     [string]$RecoveryPartitionDriveLetter = ""
+    [string]$PartitionLayoutSignature = ""
     [string]$WindowsSKU = ""
     [string]$WindowsRelease = ""
     [string]$WindowsVersion = ""
@@ -2506,7 +2527,7 @@ function Get-Office {
     WriteLog "Creating $orchestrationpath\Install-Office.ps1"   
     $installOfficePath = Join-Path -Path $orchestrationpath -ChildPath "Install-Office.ps1"
     # Create the Install-Office.ps1 file
-    $installOfficeCommand = "& d:\Office\setup.exe /configure d:\office\$OfficeInstallXML"
+    $installOfficeCommand = "& `"`$env:FFUAppsRoot\Office\setup.exe`" /configure `"`$env:FFUAppsRoot\Office\$OfficeInstallXML`""
     # Back up any pre-existing script with the same name before overwrite.
     Backup-RunFile -FFUDevelopmentPath $FFUDevelopmentPath -Path $installOfficePath
     Set-Content -Path $installOfficePath -Value $installOfficeCommand -Force
@@ -2738,10 +2759,10 @@ function Sync-UserAppListForOrchestration {
             WriteLog "Using BYO app list already staged at $stagedUserAppListPath"
         }
 
-        $appInstallConfig.UserAppListPath = "D:\$stagedUserAppListName"
+        $appInstallConfig.UserAppListPath = "%FFUAppsRoot%\$stagedUserAppListName"
     }
     elseif (Test-Path -Path (Join-Path -Path $AppsPath -ChildPath 'UserAppList.json') -PathType Leaf) {
-        $appInstallConfig.UserAppListPath = "D:\UserAppList.json"
+        $appInstallConfig.UserAppListPath = "%FFUAppsRoot%\UserAppList.json"
         WriteLog "Using default BYO app list path for orchestration."
     }
     else {
@@ -3068,6 +3089,7 @@ function Get-NormalizedPartitionDriveLetters {
         [string]$SystemPartitionDriveLetter,
         [string]$WindowsPartitionDriveLetter,
         [string]$RecoveryPartitionDriveLetter,
+        [object[]]$AdditionalDataPartitions = @(),
         [switch]$ValidateAvailable
     )
 
@@ -3075,6 +3097,17 @@ function Get-NormalizedPartitionDriveLetters {
         SystemPartitionDriveLetter   = $SystemPartitionDriveLetter
         WindowsPartitionDriveLetter  = $WindowsPartitionDriveLetter
         RecoveryPartitionDriveLetter = $RecoveryPartitionDriveLetter
+    }
+    foreach ($dataPartition in @($AdditionalDataPartitions)) {
+        if ($null -eq $dataPartition) { continue }
+        $partitionName = [string]$dataPartition.Name
+        if ([string]::IsNullOrWhiteSpace($partitionName)) {
+            $partitionName = [string]$dataPartition.Label
+        }
+        if ([string]::IsNullOrWhiteSpace($partitionName)) {
+            $partitionName = "DataPartition$($requestedLetters.Count - 2)"
+        }
+        $requestedLetters["AdditionalDataPartition:$partitionName"] = $dataPartition.DriveLetter
     }
     $normalizedLetters = [ordered]@{}
 
@@ -3103,6 +3136,107 @@ function Get-NormalizedPartitionDriveLetters {
     }
 
     return [pscustomobject]$normalizedLetters
+}
+function ConvertTo-UInt64SizeBytes {
+    param(
+        [object]$Value,
+        [string]$PropertyName
+    )
+
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
+        return 0
+    }
+
+    [uint64]$sizeBytes = 0
+    if (-not [uint64]::TryParse([string]$Value, [ref]$sizeBytes)) {
+        throw "$PropertyName must be a whole number."
+    }
+
+    return $sizeBytes
+}
+function ConvertTo-NormalizedDataPartitions {
+    param(
+        [object[]]$DataPartitions = @()
+    )
+
+    $normalizedPartitions = [System.Collections.Generic.List[pscustomobject]]::new()
+    $partitionIndex = 0
+    foreach ($dataPartition in @($DataPartitions)) {
+        if ($null -eq $dataPartition) { continue }
+        $partitionIndex++
+
+        $name = [string]$dataPartition.Name
+        $label = [string]$dataPartition.Label
+        if ([string]::IsNullOrWhiteSpace($name)) { $name = "Data$partitionIndex" }
+        if ([string]::IsNullOrWhiteSpace($label)) { $label = $name }
+
+        $driveLetter = ([string]$dataPartition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+        if ([string]::IsNullOrWhiteSpace($driveLetter) -or $driveLetter -notmatch '^[A-Z]$') {
+            throw "Additional data partition '$name' must specify a single drive letter from A to Z without a colon."
+        }
+
+        $fileSystem = [string]$dataPartition.FileSystem
+        if ([string]::IsNullOrWhiteSpace($fileSystem)) { $fileSystem = 'NTFS' }
+        if ($fileSystem -notin @('NTFS', 'ReFS', 'exFAT', 'FAT32')) {
+            throw "Additional data partition '$name' uses unsupported file system '$fileSystem'."
+        }
+
+        $sizeBytes = ConvertTo-UInt64SizeBytes -Value $dataPartition.SizeBytes -PropertyName "Additional data partition '$name' SizeBytes"
+        if ($sizeBytes -eq 0 -and $null -ne $dataPartition.SizeGB -and -not [string]::IsNullOrWhiteSpace([string]$dataPartition.SizeGB)) {
+            [decimal]$sizeGb = 0
+            if (-not [decimal]::TryParse([string]$dataPartition.SizeGB, [ref]$sizeGb)) {
+                throw "Additional data partition '$name' SizeGB must be a number."
+            }
+            $sizeBytes = [uint64]($sizeGb * 1GB)
+        }
+
+        $fillRemaining = $false
+        if ($dataPartition.PSObject.Properties.Name -contains 'FillRemaining') {
+            $fillRemaining = [System.Convert]::ToBoolean($dataPartition.FillRemaining)
+        }
+
+        if (($sizeBytes -eq 0) -and (-not $fillRemaining)) {
+            throw "Additional data partition '$name' must specify SizeBytes, SizeGB, or FillRemaining."
+        }
+
+        $normalizedPartitions.Add([pscustomobject]@{
+            Name          = $name
+            Label         = $label
+            DriveLetter   = $driveLetter
+            FileSystem    = $fileSystem
+            SizeBytes     = $sizeBytes
+            FillRemaining = $fillRemaining
+        })
+    }
+
+    $fillRemainingPartitions = @($normalizedPartitions | Where-Object { $_.FillRemaining })
+    if ($fillRemainingPartitions.Count -gt 1) {
+        throw 'Only one additional data partition can use FillRemaining.'
+    }
+
+    if ($fillRemainingPartitions.Count -eq 1) {
+        $orderedPartitions = [System.Collections.Generic.List[pscustomobject]]::new()
+        foreach ($fixedSizePartition in @($normalizedPartitions | Where-Object { -not $_.FillRemaining })) {
+            $orderedPartitions.Add($fixedSizePartition)
+        }
+        $orderedPartitions.Add($fillRemainingPartitions[0])
+        return @($orderedPartitions)
+    }
+
+    return @($normalizedPartitions)
+}
+function Get-PartitionLayoutSignature {
+    param(
+        [uint64]$OSPartitionSize,
+        [uint64]$RecoveryPartitionSize,
+        [object[]]$DataPartitions = @()
+    )
+
+    $dataPartitionSignatures = @($DataPartitions | ForEach-Object {
+        "$($_.Name)|$($_.Label)|$($_.DriveLetter)|$($_.FileSystem)|$($_.SizeBytes)|$($_.FillRemaining)"
+    })
+
+    return "OS=$OSPartitionSize;Recovery=$RecoveryPartitionSize;Data=$($dataPartitionSignatures -join ';')"
 }
 function Get-PartitionDriveLetterCacheValue {
     param(
@@ -3205,7 +3339,8 @@ function New-RecoveryPartition {
         $OsPartition,
         [uint64]$RecoveryPartitionSize = 0,
         [string]$DriveLetter = 'R',
-        [ciminstance]$DataPartition
+        [ciminstance]$DataPartition,
+        [bool]$OsPartitionUsesMaximumSize = $true
     )
 
     WriteLog "Creating empty Recovery partition (to be filled on first boot automatically)..."
@@ -3233,16 +3368,14 @@ function New-RecoveryPartition {
                 $DataPartition | Resize-Partition -Size ($DataPartition.Size - $calculatedRecoverySize)
                 WriteLog "Data partition shrunk by $calculatedRecoverySize bytes for Recovery partition."
             }
-            else {
+            elseif ($OsPartitionUsesMaximumSize) {
                 $newOsPartitionSize = [math]::Floor(($OsPartition.Size - $calculatedRecoverySize) / 4096) * 4096
                 $OsPartition | Resize-Partition -Size $newOsPartitionSize
                 WriteLog "OS partition shrunk by $calculatedRecoverySize bytes for Recovery partition."
             }
-
-            $recoveryPartition = $VhdxDisk | New-Partition -DriveLetter $DriveLetter -UseMaximumSize -GptType "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}" `
-            | Format-Volume -FileSystem NTFS -Confirm:$false -Force -NewFileSystemLabel 'Recovery' 
-
-            WriteLog "Done. Recovery partition at drive $($recoveryPartition.DriveLetter):"
+            else {
+                WriteLog 'Using free space reserved after the Windows partition for Recovery partition.'
+            }
         }
         else {
             WriteLog "No WinRE.WIM found in the OS partition under \Windows\System32\Recovery."
@@ -3251,7 +3384,72 @@ function New-RecoveryPartition {
         }
     }
 
+    if ($calculatedRecoverySize -gt 0) {
+        $recoveryPartition = $VhdxDisk | New-Partition -DriveLetter $DriveLetter -Size $calculatedRecoverySize -GptType "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}" `
+        | Format-Volume -FileSystem NTFS -Confirm:$false -Force -NewFileSystemLabel 'Recovery'
+
+        WriteLog "Done. Recovery partition at drive $($recoveryPartition.DriveLetter):"
+    }
+
     return $recoveryPartition
+}
+#Add Data partition
+function New-DataPartition {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ciminstance]$VhdxDisk,
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$DataPartition
+    )
+
+    WriteLog "Creating data partition '$($DataPartition.Name)'..."
+
+    if ($DataPartition.FillRemaining) {
+        $partition = $VhdxDisk | New-Partition -DriveLetter $DataPartition.DriveLetter -UseMaximumSize -GptType "{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}" -ErrorAction Stop
+    }
+    else {
+        $partition = $VhdxDisk | New-Partition -DriveLetter $DataPartition.DriveLetter -Size $DataPartition.SizeBytes -GptType "{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}" -ErrorAction Stop
+    }
+
+    if ([string]::IsNullOrWhiteSpace([string]$partition.DriveLetter)) {
+        Set-Partition -DiskNumber $partition.DiskNumber -PartitionNumber $partition.PartitionNumber -NewDriveLetter $DataPartition.DriveLetter -ErrorAction Stop
+        $partition = Get-Partition -DiskNumber $partition.DiskNumber -PartitionNumber $partition.PartitionNumber -ErrorAction Stop
+    }
+
+    if (([string]$partition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant() -ne $DataPartition.DriveLetter) {
+        throw "Data partition '$($DataPartition.Name)' was created, but drive letter $($DataPartition.DriveLetter): was not assigned."
+    }
+
+    $partition | Format-Volume -FileSystem $DataPartition.FileSystem -Confirm:$false -Force -NewFileSystemLabel $DataPartition.Label -ErrorAction Stop | Out-Null
+    WriteLog "Done. Data partition '$($DataPartition.Name)' at drive $($partition.DriveLetter):"
+
+    return $partition
+}
+function Get-WindowsPartitionFromDisk {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ciminstance]$Disk,
+        [string]$DriveLetter
+    )
+
+    $basicDataPartitions = @($Disk | Get-Partition | Where-Object { $_.GptType -eq '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}' })
+    $normalizedDriveLetter = ([string]$DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+    if (-not [string]::IsNullOrWhiteSpace($normalizedDriveLetter)) {
+        $driveLetterPartition = $basicDataPartitions | Where-Object { ([string]$_.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant() -eq $normalizedDriveLetter } | Select-Object -First 1
+        if ($null -ne $driveLetterPartition) {
+            return $driveLetterPartition
+        }
+    }
+
+    foreach ($partition in $basicDataPartitions) {
+        if ([string]::IsNullOrWhiteSpace($partition.DriveLetter)) { continue }
+        $volume = Get-Volume -DriveLetter $partition.DriveLetter -ErrorAction SilentlyContinue
+        if ($null -ne $volume -and $volume.FileSystemLabel -eq 'Windows') {
+            return $partition
+        }
+    }
+
+    return $basicDataPartitions | Select-Object -First 1
 }
 #Add boot files
 function Add-BootFiles {
@@ -4008,7 +4206,7 @@ function Optimize-FFUCaptureDrive {
         }
 
         # Resolve the OS partition drive letter used for volume-level optimization
-        $osPartition = $mountedDisk | Get-Partition | Where-Object { $_.GptType -eq "{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}" }
+        $osPartition = Get-WindowsPartitionFromDisk -Disk $mountedDisk -DriveLetter $WindowsPartitionDriveLetter
         if ($null -eq $osPartition -or [string]::IsNullOrWhiteSpace($osPartition.DriveLetter)) {
             throw 'Unable to resolve Windows partition drive letter for VHDX optimization.'
         }
@@ -4063,7 +4261,7 @@ function Get-CaptureVhdContext {
         $captureDisk = Mount-VHD -Path $VhdxPath -Passthru | Get-Disk
     }
 
-    $captureOsPartition = $captureDisk | Get-Partition | Where-Object { $_.GptType -eq '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}' } | Select-Object -First 1
+    $captureOsPartition = Get-WindowsPartitionFromDisk -Disk $captureDisk -DriveLetter $WindowsPartitionDriveLetter
     if ($null -eq $captureOsPartition) {
         throw 'Unable to resolve Windows partition for FFU capture.'
     }
@@ -4263,7 +4461,11 @@ function New-FFU {
         Set-Progress -Percentage 85 -Message "Optimizing FFU..."
         WriteLog 'Optimizing FFU - This will take a few minutes, please be patient'
         #Need to use ADK version of DISM to address bug in DISM - perhaps Windows 11 24H2 will fix this
-        Invoke-Process cmd "/c ""$DandIEnv"" && dism /optimize-ffu /imagefile:$FFUFile" | Out-Null
+        $optimizePartitionArgument = if ($OptimizeFFUPartitionNumber -gt 0) { " /PartitionNumber:$OptimizeFFUPartitionNumber" } else { '' }
+        if (-not [string]::IsNullOrWhiteSpace($optimizePartitionArgument)) {
+            WriteLog "Optimizing FFU with DISM partition number $OptimizeFFUPartitionNumber."
+        }
+        Invoke-Process cmd "/c ""$DandIEnv"" && dism /optimize-ffu /imagefile:$FFUFile$optimizePartitionArgument" | Out-Null
         #Invoke-Process cmd "/c dism /optimize-ffu /imagefile:$FFUFile" | Out-Null
         WriteLog 'Optimizing FFU complete'
         Set-Progress -Percentage 90 -Message "FFU post-processing complete."
@@ -5973,11 +6175,18 @@ Set-Progress -Percentage 2 -Message "Validating parameters..."
 
 #Set build partition drive letters and validate they are available for use; this is required before any build steps that require drive access to ensure the expected drive letters are reserved and to fail fast if there are conflicts.
 try {
-    $partitionDriveLetters = Get-NormalizedPartitionDriveLetters -SystemPartitionDriveLetter $SystemPartitionDriveLetter -WindowsPartitionDriveLetter $WindowsPartitionDriveLetter -RecoveryPartitionDriveLetter $RecoveryPartitionDriveLetter -ValidateAvailable
+    $normalizedAdditionalDataPartitions = ConvertTo-NormalizedDataPartitions -DataPartitions $AdditionalDataPartitions
+    if ($normalizedAdditionalDataPartitions.Count -gt 0 -and $OSPartitionSize -le 0) {
+        throw 'OSPartitionSize must be set when AdditionalDataPartitions are configured so space remains for Recovery and data partitions.'
+    }
+    $partitionLayoutSignature = Get-PartitionLayoutSignature -OSPartitionSize $OSPartitionSize -RecoveryPartitionSize $RecoveryPartitionSize -DataPartitions $normalizedAdditionalDataPartitions
+
+    $partitionDriveLetters = Get-NormalizedPartitionDriveLetters -SystemPartitionDriveLetter $SystemPartitionDriveLetter -WindowsPartitionDriveLetter $WindowsPartitionDriveLetter -RecoveryPartitionDriveLetter $RecoveryPartitionDriveLetter -AdditionalDataPartitions $normalizedAdditionalDataPartitions -ValidateAvailable
     $SystemPartitionDriveLetter = $partitionDriveLetters.SystemPartitionDriveLetter
     $WindowsPartitionDriveLetter = $partitionDriveLetters.WindowsPartitionDriveLetter
     $RecoveryPartitionDriveLetter = $partitionDriveLetters.RecoveryPartitionDriveLetter
-    WriteLog "Using build partition drive letters: System=$SystemPartitionDriveLetter, Windows=$WindowsPartitionDriveLetter, Recovery=$RecoveryPartitionDriveLetter"
+    $dataPartitionDriveLetterLog = if ($normalizedAdditionalDataPartitions.Count -gt 0) { ', Data=' + (($normalizedAdditionalDataPartitions | ForEach-Object { "$($_.Name):$($_.DriveLetter)" }) -join ', ') } else { '' }
+    WriteLog "Using build partition drive letters: System=$SystemPartitionDriveLetter, Windows=$WindowsPartitionDriveLetter, Recovery=$RecoveryPartitionDriveLetter$dataPartitionDriveLetterLog"
 }
 catch {
     $partitionDriveLetterValidationError = "Build validation failed: $($_.Exception.Message)"
@@ -6819,7 +7028,7 @@ if ($InstallApps) {
                         $KBFilePath = Save-KB -Name $update.Name -Path $DefenderPath
                         WriteLog "Latest $($update.Description) saved to $DefenderPath\$KBFilePath"
                         # Add the KB file path to the installDefenderCommand
-                        $installDefenderCommand += "& d:\Defender\$KBFilePath`r`n"
+                        $installDefenderCommand += "& `"`$env:FFUAppsRoot\Defender\$KBFilePath`"`r`n"
                     }
                 
                     # Download latest Defender Definitions
@@ -6835,7 +7044,7 @@ if ($InstallApps) {
                         WriteLog "Defender definitions URL is $DefenderDefURL"
                         Start-BitsTransferWithRetry -Source $DefenderDefURL -Destination "$DefenderPath\mpam-fe.exe"
                         WriteLog "Defender Definitions downloaded to $DefenderPath\mpam-fe.exe"
-                        $installDefenderCommand += "& d:\Defender\mpam-fe.exe"
+                        $installDefenderCommand += "& `"`$env:FFUAppsRoot\Defender\mpam-fe.exe`""
                     }
                     catch {
                         Write-Host "Downloading Defender Definitions Failed"
@@ -6903,7 +7112,7 @@ if ($InstallApps) {
                     # Create Update-MSRT.ps1
                     $installMSRTPath = Join-Path -Path $orchestrationPath -ChildPath "Update-MSRT.ps1"
                     WriteLog "Creating $installMSRTPath"
-                    $installMSRTCommand = "& d:\MSRT\$MSRTFileName /quiet"
+                    $installMSRTCommand = "& `"`$env:FFUAppsRoot\MSRT\$MSRTFileName`" /quiet"
                     # Back up any pre-existing script with the same name before overwrite.
                     Backup-RunFile -FFUDevelopmentPath $FFUDevelopmentPath -Path $installMSRTPath
                     Set-Content -Path $installMSRTPath -Value $installMSRTCommand -Force
@@ -6956,7 +7165,7 @@ if ($InstallApps) {
                     # Create Update-OneDrive.ps1
                     $installODPath = Join-Path -Path $orchestrationPath -ChildPath "Update-OneDrive.ps1"
                     WriteLog "Creating $installODPath"
-                    $installODCommand = "& d:\OneDrive\OneDriveSetup.exe /allusers /silent"
+                    $installODCommand = "& `"`$env:FFUAppsRoot\OneDrive\OneDriveSetup.exe`" /allusers /silent"
                     # Back up any pre-existing script with the same name before overwrite.
                     Backup-RunFile -FFUDevelopmentPath $FFUDevelopmentPath -Path $installODPath
                     Set-Content -Path $installODPath -Value $installODCommand -Force
@@ -7012,7 +7221,7 @@ if ($InstallApps) {
                     # Create Update-Edge.ps1
                     $installEdgePath = Join-Path -Path $orchestrationPath -ChildPath "Update-Edge.ps1"
                     WriteLog "Creating $installEdgePath"
-                    $installEdgeCommand = "& d:\Edge\$EdgeMSIFileName /quiet /norestart"
+                    $installEdgeCommand = "& `"`$env:FFUAppsRoot\Edge\$EdgeMSIFileName`" /quiet /norestart"
                     # Back up any pre-existing script with the same name before overwrite.
                     Backup-RunFile -FFUDevelopmentPath $FFUDevelopmentPath -Path $installEdgePath
                     Set-Content -Path $installEdgePath -Value $installEdgeCommand -Force
@@ -7286,6 +7495,8 @@ try {
                     if ($cachedSystemPartitionDriveLetter -ne $SystemPartitionDriveLetter) { WriteLog "SystemPartitionDriveLetter mismatch (cached: $($vhdxCacheItem.SystemPartitionDriveLetter), current: $SystemPartitionDriveLetter), continuing"; continue }
                     if ($cachedWindowsPartitionDriveLetter -ne $WindowsPartitionDriveLetter) { WriteLog "WindowsPartitionDriveLetter mismatch (cached: $($vhdxCacheItem.WindowsPartitionDriveLetter), current: $WindowsPartitionDriveLetter), continuing"; continue }
                     if ($cachedRecoveryPartitionDriveLetter -ne $RecoveryPartitionDriveLetter) { WriteLog "RecoveryPartitionDriveLetter mismatch (cached: $($vhdxCacheItem.RecoveryPartitionDriveLetter), current: $RecoveryPartitionDriveLetter), continuing"; continue }
+                    if ($vhdxCacheItem.PSObject.Properties.Name -notcontains 'PartitionLayoutSignature') { WriteLog 'PartitionLayoutSignature missing in cached config, continuing'; continue }
+                    if ($vhdxCacheItem.PartitionLayoutSignature -ne $partitionLayoutSignature) { WriteLog 'PartitionLayoutSignature mismatch, continuing'; continue }
 
                     $cachedUpdateNames = @()
                     if ($vhdxCacheItem.IncludedUpdates -and $vhdxCacheItem.IncludedUpdates.Count -gt 0) {
@@ -7612,8 +7823,11 @@ try {
         $osPartitionDriveLetter = $osPartition[1].DriveLetter
         $WindowsPartition = $osPartitionDriveLetter + ':\'
 
-        #$recoveryPartition = New-RecoveryPartition -VhdxDisk $vhdxDisk -OsPartition $osPartition[1] -RecoveryPartitionSize $RecoveryPartitionSize -DataPartition $dataPartition
-        $recoveryPartition = New-RecoveryPartition -VhdxDisk $vhdxDisk -OsPartition $osPartition[1] -RecoveryPartitionSize $RecoveryPartitionSize -DriveLetter $RecoveryPartitionDriveLetter -DataPartition $dataPartition
+        $recoveryPartition = New-RecoveryPartition -VhdxDisk $vhdxDisk -OsPartition $osPartition[1] -RecoveryPartitionSize $RecoveryPartitionSize -DriveLetter $RecoveryPartitionDriveLetter -OsPartitionUsesMaximumSize ($OSPartitionSize -le 0)
+
+        foreach ($additionalDataPartition in $normalizedAdditionalDataPartitions) {
+            New-DataPartition -VhdxDisk $vhdxDisk -DataPartition $additionalDataPartition | Out-Null
+        }
 
         WriteLog 'All necessary partitions created.'
 
@@ -7749,7 +7963,7 @@ try {
         $VHDXPath = Join-Path $($VMPath) $($cachedVHDXInfo.VhdxFileName)
 
         $vhdxDisk = Get-VHD -Path $VHDXPath | Mount-VHD -Passthru | Get-Disk
-        $osPartition = $vhdxDisk | Get-Partition | Where-Object { $_.GptType -eq '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}' }
+        $osPartition = Get-WindowsPartitionFromDisk -Disk $vhdxDisk -DriveLetter $WindowsPartitionDriveLetter
         $osPartitionDriveLetter = $osPartition.DriveLetter
         $WindowsPartition = $osPartitionDriveLetter + ':\'
 
@@ -7791,6 +8005,7 @@ try {
         $cachedVHDXInfo.SystemPartitionDriveLetter = [string]$SystemPartitionDriveLetter
         $cachedVHDXInfo.WindowsPartitionDriveLetter = [string]$WindowsPartitionDriveLetter
         $cachedVHDXInfo.RecoveryPartitionDriveLetter = [string]$RecoveryPartitionDriveLetter
+        $cachedVHDXInfo.PartitionLayoutSignature = $partitionLayoutSignature
         $cachedVHDXInfo.WindowsSKU = $WindowsSKU
         $cachedVHDXInfo.WindowsRelease = $WindowsRelease
         $cachedVHDXInfo.WindowsVersion = $WindowsVersion
@@ -7893,7 +8108,7 @@ if ($InstallApps -and $installLatestCuInVm) {
         # Create Install-LTSCUpdate.ps1 for in-VM execution via orchestrator
         $installLtscUpdateCommand = @"
 # Validate LTSC CU package exists on Apps ISO mount
-`$kbPath = "D:\LTSCUpdate\$ltscCuFileName"
+`$kbPath = Join-Path -Path `$env:FFUAppsRoot -ChildPath "LTSCUpdate\$ltscCuFileName"
 
 # Extract KB ID from filename for idempotent checks
 `$kbFileName = Split-Path -Path `$kbPath -Leaf
@@ -7990,10 +8205,17 @@ if ($InstallApps) {
         WriteLog 'Mounting VHDX to inject unattend for audit-mode boot'
         $disk = Mount-VHD -Path $VHDXPath -Passthru | Get-Disk
     }
-    $osPartition = $disk | Get-Partition | Where-Object { $_.GptType -eq '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}' }
+    $osPartition = Get-WindowsPartitionFromDisk -Disk $disk -DriveLetter $WindowsPartitionDriveLetter
     $osPartitionDriveLetter = $osPartition.DriveLetter
     WriteLog 'Copying unattend file to boot to audit mode'
     New-Item -Path "$($osPartitionDriveLetter):\Windows\Panther\Unattend" -ItemType Directory -Force | Out-Null
+    $orchestrationBootstrapSourcePath = Join-Path -Path $FFUDevelopmentPath -ChildPath 'BuildFFUUnattend\Start-FFUOrchestration.ps1'
+    if (-not (Test-Path -Path $orchestrationBootstrapSourcePath -PathType Leaf)) {
+        throw "Orchestration bootstrap script not found at $orchestrationBootstrapSourcePath"
+    }
+    $orchestrationBootstrapTargetFolder = "$($osPartitionDriveLetter):\Windows\Setup\Scripts"
+    New-Item -Path $orchestrationBootstrapTargetFolder -ItemType Directory -Force | Out-Null
+    Copy-Item -Path $orchestrationBootstrapSourcePath -Destination (Join-Path -Path $orchestrationBootstrapTargetFolder -ChildPath 'Start-FFUOrchestration.ps1') -Force | Out-Null
     if ($WindowsArch -eq 'x64') {
         Copy-Item -Path "$FFUDevelopmentPath\BuildFFUUnattend\unattend_x64.xml" -Destination "$($osPartitionDriveLetter):\Windows\Panther\Unattend\Unattend.xml" -Force | Out-Null
     }

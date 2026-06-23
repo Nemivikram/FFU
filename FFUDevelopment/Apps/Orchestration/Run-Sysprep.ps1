@@ -78,9 +78,10 @@ else {
     Write-Host "No per-user, non-provisioned Appx packages detected."
 }
 
-# If an Unattend.xml has been provided on the mounted Apps ISO (D:\Unattend\Unattend.xml),
+# If an Unattend.xml has been provided on the mounted Apps ISO,
 # pass it to sysprep; otherwise, run without /unattend.
-$unattendOnAppsIso = "D:\Unattend\Unattend.xml"
+$appsMediaRoot = if ([string]::IsNullOrWhiteSpace([string]$env:FFUAppsRoot)) { "D:" } else { ([string]$env:FFUAppsRoot).Trim().TrimEnd('\') }
+$unattendOnAppsIso = Join-Path -Path $appsMediaRoot -ChildPath "Unattend\Unattend.xml"
 if (Test-Path -Path $unattendOnAppsIso) {
     Write-Host "Using $unattendOnAppsIso from Apps ISO..."
     & "C:\windows\system32\sysprep\sysprep.exe" /quiet /generalize /oobe /unattend:$unattendOnAppsIso

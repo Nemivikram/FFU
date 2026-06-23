@@ -19,6 +19,7 @@ This table lists all top-level parameters in BuildFFUVM.ps1.
 | Parameter | Type | UI Control | Description |
 | --- | --- | --- | --- |
 | -AdditionalFFUFiles | string[] | Copy Additional FFU Files + Additional FFU Files list | Array of full file paths to existing FFU files that should also be copied to the deployment USB when -CopyAdditionalFFUFiles is set to $true. |
+| -AdditionalDataPartitions | object[] | Additional Data Partitions | Creates optional data partitions after the Recovery partition. Each item supports Name, Label, DriveLetter, SizeBytes or SizeGB, FillRemaining, and FileSystem. Only one item can use FillRemaining. Fixed-size data partitions are created before the fill-remaining data partition. |
 | -AllowExternalHardDiskMedia | bool | Allow External Hard Disk Media | When set to $true, will allow the use of media identified as External Hard Disk media via WMI class Win32_DiskDrive. Default is not defined. |
 | -AllowVHDXCaching | bool | Allow VHDX Caching | When set to $true, will cache the VHDX file to the $FFUDevelopmentPath\VHDXCache folder and create a config json file that will keep track of the Windows build information, the updates installed, and the logical sector byte size information. Default is $false. |
 | -AppListPath | string | AppList.json Path | Path to a JSON file containing a list of applications to install using WinGet. Default is $FFUDevelopmentPath\Apps\AppList.json. |
@@ -69,6 +70,8 @@ This table lists all top-level parameters in BuildFFUVM.ps1.
 | -Model | string | Driver Models list | Model of the device to download drivers. This is required if Make is set. |
 | -OfficeConfigXMLFile | string | Office Configuration XML File | Path to a custom Office configuration XML file to use for installation. |
 | -Optimize | bool | Optimize | When set to $true, will optimize the FFU file. Default is $true. |
+| -OptimizeFFUPartitionNumber | int | CLI/config only | Optional partition number to pass to DISM /Optimize-FFU /PartitionNumber. Leave as 0 to optimize with DISM defaults. |
+| -OSPartitionSize | uint64 | Windows Partition Size (GB) | Fixed size of the Windows partition in bytes. Required when -AdditionalDataPartitions is configured so the VHDX has room for Recovery and data partitions. The UI stores this from the GB value. |
 | -OptionalFeatures | string | Optional Features | Provide a semicolon-separated list of Windows optional features you want to include in the FFU (e.g., netfx3;TFTP). |
 | -OrchestrationPath | string | Application Path (derived Orchestration path) | Path to the orchestration folder containing scripts that run inside the VM. Default is $FFUDevelopmentPath\Apps\Orchestration. |
 | -PEDriversFolder | string | PE Drivers Folder | Path to the folder containing drivers to be injected into the WinPE deployment media. Default is $FFUDevelopmentPath\PEDrivers. |
@@ -76,6 +79,7 @@ This table lists all top-level parameters in BuildFFUVM.ps1.
 | -ProductKey | string | Product Key | Product key for the Windows edition specified in WindowsSKU. This will overwrite whatever SKU is entered for WindowsSKU. Recommended to use if you want to use a MAK or KMS key to activate Enterprise or Education. If using VL media instead of consumer media, you'll want to enter a MAK or KMS key here. |
 | -PromptExternalHardDiskMedia | bool | Prompt for External Hard Disk Media | When set to $true, will prompt the user to confirm the use of media identified as External Hard Disk media via WMI class Win32_DiskDrive. Default is $true. |
 | -RecoveryPartitionDriveLetter | string | Recovery Partition Drive Letter | Drive letter used for the Recovery partition while building the FFU VHDX. Default is R. |
+| -RecoveryPartitionSize | uint64 | Recovery Partition Size (GB) | Optional fixed size of the Recovery partition in bytes. Leave unset or 0 to let the build calculate the Recovery partition size from winre.wim plus buffer space. The UI stores this from the GB value. |
 | -RemoveApps | bool | Remove Apps Folder Content | When set to $true, will remove the application content in the Apps folder after the FFU has been captured. Default is $true. |
 | -RemoveDownloadedESD | bool | Remove Downloaded ESD file(s) | When set to $true, downloaded Windows ESD files are automatically deleted after they have been applied. Default is $true. |
 | -RemoveFFU | bool | Remove FFU | When set to $true, will remove the FFU file from the $FFUDevelopmentPath\FFU folder after it has been copied to the USB drive. Default is $false. |

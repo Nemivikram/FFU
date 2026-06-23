@@ -40,6 +40,7 @@ $script:uiState = [PSCustomObject]@{
     Data               = @{
         allDriverModels             = [System.Collections.Generic.List[PSCustomObject]]::new();
         appsScriptVariablesDataList = [System.Collections.Generic.List[PSCustomObject]]::new();
+        additionalDataPartitionsDataList = [System.Collections.Generic.List[PSCustomObject]]::new();
         versionData                 = $null; 
         vmSwitchMap                 = @{};
         logData                     = $null;
@@ -415,6 +416,12 @@ $script:uiState.Controls.btnRun.Add_Click({
             $txtStatus = $script:uiState.Controls.txtStatus
             $progressBar.Visibility = 'Visible'
             $txtStatus.Text = "Starting FFU build..."
+
+            if (-not (Add-PendingAdditionalDataPartition -State $script:uiState)) {
+                $btnRun.IsEnabled = $true
+                $script:uiState.Controls.txtStatus.Text = "Build canceled: data partition configuration incomplete."
+                return
+            }
             
             # Gather config on the UI thread before starting the job
             $config = Get-UIConfig -State $script:uiState
@@ -424,6 +431,13 @@ $script:uiState.Controls.btnRun.Add_Click({
                 [System.Windows.MessageBox]::Show("Please select at least one additional FFU file to copy, or uncheck 'Copy Additional FFU Files'.", "Selection Required", "OK", "Warning") | Out-Null
                 $btnRun.IsEnabled = $true
                 $script:uiState.Controls.txtStatus.Text = "Build canceled: Additional FFU selection required."
+                return
+            }
+
+            if (($null -ne $config.AdditionalDataPartitions) -and ($config.AdditionalDataPartitions.Count -gt 0) -and ($config.OSPartitionSize -le 0)) {
+                [System.Windows.MessageBox]::Show("Set Windows Partition Size (GB) before adding data partitions so the VHDX has reserved space for Recovery and data partitions.", "Windows Partition Size Required", "OK", "Warning") | Out-Null
+                $btnRun.IsEnabled = $true
+                $script:uiState.Controls.txtStatus.Text = "Build canceled: Windows partition size required for data partitions."
                 return
             }
 

@@ -377,6 +377,9 @@ function Register-EventHandlers {
     # List of TextBox controls that require integer-only input
     $integerOnlyTextBoxes = @(
         $State.Controls.txtDiskSize,
+        $State.Controls.txtOSPartitionSizeGB,
+        $State.Controls.txtRecoveryPartitionSizeGB,
+        $State.Controls.txtDataPartitionSizeGB,
         $State.Controls.txtMemory,
         $State.Controls.txtProcessors,
         $State.Controls.txtThreads,
@@ -990,6 +993,52 @@ function Register-EventHandlers {
             $localState = $window.Tag
 
             Update-VMNetworkingControls -State $localState
+        })
+
+    $State.Controls.chkDataPartitionFillRemaining.Add_Checked({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            $localState.Controls.txtDataPartitionSizeGB.IsEnabled = $false
+            $localState.Controls.txtDataPartitionSizeGB.Clear()
+        })
+
+    $State.Controls.chkDataPartitionFillRemaining.Add_Unchecked({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            $localState.Controls.txtDataPartitionSizeGB.IsEnabled = $true
+        })
+
+    $State.Controls.btnAddDataPartition.Add_Click({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            Add-AdditionalDataPartition -State $localState
+        })
+
+    $State.Controls.btnRemoveSelectedDataPartitions.Add_Click({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            Remove-SelectedDataPartition -State $localState
+        })
+
+    $State.Controls.btnClearDataPartitions.Add_Click({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+
+            Clear-ListViewContent -State $localState `
+                -ListViewControl $localState.Controls.lstDataPartitions `
+                -BackingDataList $localState.Data.additionalDataPartitionsDataList `
+                -ConfirmationTitle "Clear Data Partitions" `
+                -ConfirmationMessage "Are you sure you want to clear all additional data partitions?" `
+                -StatusMessage "Additional data partitions list cleared." `
+                -TextBoxesToClear @($localState.Controls.txtDataPartitionName, $localState.Controls.txtDataPartitionSizeGB)
+
+            $localState.Controls.chkDataPartitionFillRemaining.IsChecked = $false
+            $localState.Controls.txtDataPartitionSizeGB.IsEnabled = $true
         })
 
     # Persist custom VM switch name when user edits it while 'Other' is selected

@@ -1565,10 +1565,28 @@ if ($dismExitCode -ne 0) {
 
 WriteLog 'Successfully applied FFU'
 
+function Get-WindowsPartitionFromAppliedDisk {
+    param(
+        [Parameter(Mandatory)]
+        [int]$DiskNumber
+    )
+
+    $basicDataPartitions = @(Get-Partition -DiskNumber $DiskNumber | Where-Object { $_.GptType -eq '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}' })
+    foreach ($partition in $basicDataPartitions) {
+        if ([string]::IsNullOrWhiteSpace($partition.DriveLetter)) { continue }
+        $volume = Get-Volume -DriveLetter $partition.DriveLetter -ErrorAction SilentlyContinue
+        if ($null -ne $volume -and $volume.FileSystemLabel -eq 'Windows') {
+            return $partition
+        }
+    }
+
+    return $basicDataPartitions | Select-Object -First 1
+}
+
 # Verify Windows partition exists and assign drive letter
-$windowsPartition = Get-Partition -DiskNumber $DiskID | Where-Object { $_.PartitionNumber -eq 3 }
+$windowsPartition = Get-WindowsPartitionFromAppliedDisk -DiskNumber $DiskID
 if ($null -eq $windowsPartition) {
-    $errorMessage = "Windows partition (Partition 3) not found after applying FFU, even though DISM reported success."
+    $errorMessage = "Windows partition not found after applying FFU, even though DISM reported success."
     WriteLog $errorMessage
     Stop-Script -Message $errorMessage
 }
@@ -1585,7 +1603,7 @@ if ($null -eq $windowsVolume) {
 }
 WriteLog "Successfully assigned drive letter 'W'."
 
-$recoveryPartition = Get-Partition -DiskNumber $DiskID | Where-Object PartitionNumber -eq 4
+$recoveryPartition = Get-Partition -DiskNumber $DiskID | Where-Object Type -eq Recovery | Select-Object -First 1
 if ($recoveryPartition) {
     WriteLog 'Setting recovery partition attributes'
     $diskpartScript = @(
@@ -1602,12 +1620,17 @@ if ($recoveryPartition) {
 $WinRE = $USBDrive + "WinRE\winre.wim"
 If (Test-Path -Path $WinRE) {
     WriteLog 'Copying modified WinRE to Recovery directory'
-    Get-Disk | Where-Object Number -eq $DiskID | Get-Partition | Where-Object Type -eq Recovery | Set-Partition -NewDriveLetter R
+    if ($null -eq $recoveryPartition) {
+        $errorMessage = 'Recovery partition not found after applying FFU. Cannot copy modified WinRE.'
+        WriteLog $errorMessage
+        Stop-Script -Message $errorMessage
+    }
+    Set-Partition -InputObject $recoveryPartition -NewDriveLetter R
     Invoke-Process xcopy.exe "/h $WinRE R:\Recovery\WindowsRE\ /Y"
     WriteLog 'Copying WinRE to Recovery directory succeeded'
     WriteLog 'Registering location of recovery tools'
     Invoke-Process W:\Windows\System32\Reagentc.exe "/Setreimage /Path R:\Recovery\WindowsRE /Target W:\Windows"
-    Get-Disk | Where-Object Number -eq $DiskID | Get-Partition | Where-Object Type -eq Recovery | Remove-PartitionAccessPath -AccessPath R:
+    Remove-PartitionAccessPath -InputObject $recoveryPartition -AccessPath R:
     WriteLog 'Registering location of recovery tools succeeded'
 }
 #Autopilot JSON

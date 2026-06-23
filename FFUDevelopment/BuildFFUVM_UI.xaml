@@ -429,6 +429,75 @@
                                         <ComboBoxItem Content="Y"/>
                                         <ComboBoxItem Content="Z"/>
                                     </ComboBox>
+                                    <!-- Additional Data Partitions -->
+                                    <Expander Header="Additional Data Partitions" Margin="0,0,0,20" IsExpanded="False" ToolTip="Create optional data partitions after the Windows Recovery partition. Set Windows Partition Size when adding data partitions so free space remains on the VHDX.">
+                                        <StackPanel Margin="0,10,0,0">
+                                            <TextBlock Text="Windows Partition Size (GB)" Margin="0,0,0,8" ToolTip="Required when additional data partitions are configured. Leave blank to use the default Windows partition sizing behavior."/>
+                                            <TextBox x:Name="txtOSPartitionSizeGB" Width="120" HorizontalAlignment="Left" Margin="0,0,0,12" ToolTip="Size of the Windows partition in GB when additional data partitions are configured."/>
+
+                                            <TextBlock Text="Recovery Partition Size (GB)" Margin="0,0,0,8" ToolTip="Optional fixed Recovery partition size in GB. Leave blank to use the default calculated Recovery partition size."/>
+                                            <TextBox x:Name="txtRecoveryPartitionSizeGB" Width="120" HorizontalAlignment="Left" Margin="0,0,0,16" ToolTip="Optional size of the Recovery partition in GB."/>
+
+                                            <Grid Margin="0,0,0,12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="180"/>
+                                                    <ColumnDefinition Width="100"/>
+                                                    <ColumnDefinition Width="120"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" Margin="0,0,8,8"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="1" Text="Drive Letter" Margin="0,0,8,8"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="2" Text="Size (GB)" Margin="0,0,8,8"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="3" Text="Fill Remaining" Margin="0,0,0,8"/>
+                                                <TextBox x:Name="txtDataPartitionName" Grid.Row="1" Grid.Column="0" Margin="0,0,8,0" ToolTip="Name and volume label for the data partition."/>
+                                                <ComboBox x:Name="cmbDataPartitionDriveLetter" Grid.Row="1" Grid.Column="1" Margin="0,0,8,0" ToolTip="Build-time drive letter for the data partition.">
+                                                    <ComboBoxItem Content="D" IsSelected="True"/>
+                                                    <ComboBoxItem Content="E"/>
+                                                    <ComboBoxItem Content="F"/>
+                                                    <ComboBoxItem Content="G"/>
+                                                    <ComboBoxItem Content="H"/>
+                                                    <ComboBoxItem Content="I"/>
+                                                    <ComboBoxItem Content="J"/>
+                                                    <ComboBoxItem Content="K"/>
+                                                    <ComboBoxItem Content="L"/>
+                                                    <ComboBoxItem Content="M"/>
+                                                    <ComboBoxItem Content="N"/>
+                                                    <ComboBoxItem Content="O"/>
+                                                    <ComboBoxItem Content="P"/>
+                                                    <ComboBoxItem Content="Q"/>
+                                                    <ComboBoxItem Content="T"/>
+                                                    <ComboBoxItem Content="U"/>
+                                                    <ComboBoxItem Content="V"/>
+                                                    <ComboBoxItem Content="X"/>
+                                                    <ComboBoxItem Content="Y"/>
+                                                    <ComboBoxItem Content="Z"/>
+                                                </ComboBox>
+                                                <TextBox x:Name="txtDataPartitionSizeGB" Grid.Row="1" Grid.Column="2" Margin="0,0,8,0" ToolTip="Data partition size in GB. Leave blank only when Fill Remaining is selected."/>
+                                                <CheckBox x:Name="chkDataPartitionFillRemaining" Grid.Row="1" Grid.Column="3" VerticalAlignment="Center" ToolTip="Use the remaining VHDX space for this data partition. Only one data partition can fill remaining space."/>
+                                            </Grid>
+
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                                <Button x:Name="btnAddDataPartition" Content="Add Data Partition" Width="160" Margin="0,0,8,0" ToolTip="Add the configured data partition to the build configuration."/>
+                                                <Button x:Name="btnRemoveSelectedDataPartitions" Content="Remove Selected" Width="140" Margin="0,0,8,0" ToolTip="Remove selected data partitions from the list."/>
+                                                <Button x:Name="btnClearDataPartitions" Content="Clear" Width="80" ToolTip="Clear all additional data partitions."/>
+                                            </StackPanel>
+
+                                            <ListView x:Name="lstDataPartitions" Height="150" Margin="0" SelectionMode="Extended" BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                                                <ListView.View>
+                                                    <GridView>
+                                                        <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="180"/>
+                                                        <GridViewColumn Header="Drive Letter" DisplayMemberBinding="{Binding DriveLetter}" Width="100"/>
+                                                        <GridViewColumn Header="Size (GB)" DisplayMemberBinding="{Binding SizeGB}" Width="100"/>
+                                                        <GridViewColumn Header="Fill Remaining" DisplayMemberBinding="{Binding FillRemaining}" Width="120"/>
+                                                    </GridView>
+                                                </ListView.View>
+                                            </ListView>
+                                        </StackPanel>
+                                    </Expander>
                                     <!-- Logical Sector Size -->
                                     <TextBlock Text="Logical Sector Size" Margin="0,0,0,8" ToolTip="Unit32 value of 512 or 4096. Useful for 4Kn drives or devices shipping with UFS drives. Default is 512."/>
                                     <ComboBox x:Name="cmbLogicalSectorSize" HorizontalAlignment="Left" ToolTip="Unit32 value of 512 or 4096. Useful for 4Kn drives or devices shipping with UFS drives. Default is 512.">
@@ -632,11 +701,11 @@
     
                                                 <!-- Command Line -->
                                                 <TextBlock Text="Command Line:" Margin="0,0,0,8"/>
-                                                <TextBox x:Name="txtAppCommandLine" Margin="0,0,0,20" ToolTip="Enter the full path to the command line to install the application. This should start with D:\Win32 for exe, cmd, etc types of deployments (e.g. D:\Win32\Mozilla FireFox\setup.exe). For MSI installs, use msiexec and then fill in the rest of the arguments in the arguments field."/>
+                                                <TextBox x:Name="txtAppCommandLine" Margin="0,0,0,20" ToolTip="Enter the full path to the command line to install the application. Use %FFUAppsRoot%\Win32 for exe, cmd, etc types of deployments (e.g. %FFUAppsRoot%\Win32\Mozilla FireFox\setup.exe). Legacy D:\Win32 paths are still supported. For MSI installs, use msiexec and then fill in the rest of the arguments in the arguments field."/>
     
                                                 <!-- Arguments -->
                                                 <TextBlock Text="Arguments:" Margin="0,0,0,8"/>
-                                                <TextBox x:Name="txtAppArguments" Margin="0,0,0,20" ToolTip="Enter the arguments for the command line. If the application is an msi, the command line should only contain msiexec and the rest of the command line arguments would go here (e.g. /i &quot;D:\Win32\Mozilla firefox\setup.msi&quot; /qn /norestart)."/>
+                                                <TextBox x:Name="txtAppArguments" Margin="0,0,0,20" ToolTip="Enter the arguments for the command line. If the application is an msi, the command line should only contain msiexec and the rest of the command line arguments would go here (e.g. /i &quot;%FFUAppsRoot%\Win32\Mozilla firefox\setup.msi&quot; /qn /norestart). Legacy D:\Win32 paths are still supported."/>
     
                                                 <!-- Source -->
                                                 <TextBlock Text="Source:" Margin="0,0,0,8"/>

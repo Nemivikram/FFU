@@ -258,6 +258,16 @@ function Initialize-UIControls {
     $State.Controls.cmbSystemPartitionDriveLetter = $window.FindName('cmbSystemPartitionDriveLetter')
     $State.Controls.cmbWindowsPartitionDriveLetter = $window.FindName('cmbWindowsPartitionDriveLetter')
     $State.Controls.cmbRecoveryPartitionDriveLetter = $window.FindName('cmbRecoveryPartitionDriveLetter')
+    $State.Controls.txtOSPartitionSizeGB = $window.FindName('txtOSPartitionSizeGB')
+    $State.Controls.txtRecoveryPartitionSizeGB = $window.FindName('txtRecoveryPartitionSizeGB')
+    $State.Controls.txtDataPartitionName = $window.FindName('txtDataPartitionName')
+    $State.Controls.cmbDataPartitionDriveLetter = $window.FindName('cmbDataPartitionDriveLetter')
+    $State.Controls.txtDataPartitionSizeGB = $window.FindName('txtDataPartitionSizeGB')
+    $State.Controls.chkDataPartitionFillRemaining = $window.FindName('chkDataPartitionFillRemaining')
+    $State.Controls.btnAddDataPartition = $window.FindName('btnAddDataPartition')
+    $State.Controls.btnRemoveSelectedDataPartitions = $window.FindName('btnRemoveSelectedDataPartitions')
+    $State.Controls.btnClearDataPartitions = $window.FindName('btnClearDataPartitions')
+    $State.Controls.lstDataPartitions = $window.FindName('lstDataPartitions')
     $State.Controls.cmbLogicalSectorSize = $window.FindName('cmbLogicalSectorSize')
     $State.Controls.txtProductKey = $window.FindName('txtProductKey')
     $State.Controls.txtOfficePath = $window.FindName('txtOfficePath')
@@ -812,6 +822,14 @@ function Initialize-DynamicUIElements {
 
     # Keep BYO application columns sized to the current visible content.
     Enable-ListViewColumnAutoResize -ListView $State.Controls.lstApplications -FixedColumnIndexes @(0)
+
+    # Additional Data Partitions ListView setup
+    $State.Controls.lstDataPartitions.ItemsSource = $State.Data.additionalDataPartitionsDataList.ToArray()
+    $itemStyleDataPartitions = New-Object System.Windows.Style([System.Windows.Controls.ListViewItem])
+    if ($null -ne $listViewItemBaseStyle) { $itemStyleDataPartitions.BasedOn = $listViewItemBaseStyle }
+    $itemStyleDataPartitions.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.ListViewItem]::HorizontalContentAlignmentProperty, [System.Windows.HorizontalAlignment]::Stretch)))
+    $State.Controls.lstDataPartitions.ItemContainerStyle = $itemStyleDataPartitions
+    Request-ListViewColumnAutoResize -ListView $State.Controls.lstDataPartitions
 
     # Apps Script Variables ListView setup
     # Bind ItemsSource to the data list

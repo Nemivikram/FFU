@@ -55,7 +55,19 @@ Drive letter used for the Windows partition while building the FFU VHDX. Default
 
 Drive letter used for the Recovery partition while building the FFU VHDX. Default is `R`.
 
-These settings only affect FFU creation. They do not change the hard-coded drive letters used by `ApplyFFU.ps1` during deployment.
+These settings only affect FFU creation. The deployment script discovers the Windows and Recovery partitions from the applied disk instead of relying on fixed partition numbers.
+
+## Additional Data Partitions
+
+Creates optional data partitions after the Windows Recovery partition. This keeps Recovery immediately after Windows, which leaves the normal WinRE layout intact while still allowing one or more data volumes in the captured FFU.
+
+Set **Windows Partition Size (GB)** before adding data partitions. Without an explicit Windows partition size, Windows would consume the remaining VHDX space and there would be no room left for Recovery and data partitions.
+
+Use **Recovery Partition Size (GB)** only when you need a fixed Recovery partition size. Leave it blank to let the build calculate the Recovery size from `winre.wim` plus buffer space.
+
+Each data partition has a name, build-time drive letter, and either a size in GB or **Fill Remaining**. Only one data partition can use **Fill Remaining**. Fixed-size data partitions are created before the fill-remaining data partition so the fill-remaining volume does not consume space reserved for later fixed-size volumes.
+
+The Apps ISO drive letter is discovered at runtime. If you create a data partition that uses `D:`, application installs should use `%FFUAppsRoot%` for Apps ISO paths. Legacy `D:\` paths in `UserAppList.json` are still supported when they point to files on the Apps ISO.
 
 ## Logical Sector Size
 

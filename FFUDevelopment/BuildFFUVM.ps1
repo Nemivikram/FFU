@@ -3493,12 +3493,37 @@ function Get-FFUOptimizePartitionNumber {
             throw "FillRemaining data partition '$($fillRemainingDataPartition.Name)' does not have a drive letter for FFU optimization."
         }
 
-        $dataPartition = $Disk | Get-Partition | Where-Object { ([string]$_.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant() -eq $driveLetter } | Select-Object -First 1
+        $basicDataPartitions = @($Disk | Get-Partition | Where-Object { $_.GptType -eq '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}' })
+        $dataPartition = $basicDataPartitions | Where-Object { ([string]$_.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant() -eq $driveLetter } | Select-Object -First 1
         if ($null -eq $dataPartition) {
-            throw "Unable to resolve FillRemaining data partition '$($fillRemainingDataPartition.Name)' at drive ${driveLetter}: for FFU optimization."
+            $expectedLabels = [System.Collections.Generic.List[string]]::new()
+            foreach ($labelValue in @($fillRemainingDataPartition.Label, $fillRemainingDataPartition.Name)) {
+                $label = ([string]$labelValue).Trim()
+                if (-not [string]::IsNullOrWhiteSpace($label) -and -not $expectedLabels.Contains($label)) {
+                    $expectedLabels.Add($label)
+                }
+            }
+
+            foreach ($partition in $basicDataPartitions) {
+                if ([string]::IsNullOrWhiteSpace([string]$partition.DriveLetter)) { continue }
+                $volume = Get-Volume -DriveLetter $partition.DriveLetter -ErrorAction SilentlyContinue
+                if ($null -eq $volume) { continue }
+
+                if ($expectedLabels -contains ([string]$volume.FileSystemLabel)) {
+                    $dataPartition = $partition
+                    break
+                }
+            }
+        }
+        if ($null -eq $dataPartition) {
+            $expectedLabelText = $expectedLabels -join "' or '"
+            $expectedLabelMessage = if ($expectedLabels.Count -gt 0) { " or label '$expectedLabelText'" } else { '' }
+            throw "Unable to resolve FillRemaining data partition '$($fillRemainingDataPartition.Name)' at drive ${driveLetter}:$expectedLabelMessage for FFU optimization."
         }
 
-        WriteLog "Using FillRemaining data partition '$($fillRemainingDataPartition.Name)' (partition number $($dataPartition.PartitionNumber)) for FFU optimization."
+        $resolvedDriveLetter = ([string]$dataPartition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+        $resolvedDriveLetterLog = if ([string]::IsNullOrWhiteSpace($resolvedDriveLetter)) { '' } else { ", drive ${resolvedDriveLetter}:" }
+        WriteLog "Using FillRemaining data partition '$($fillRemainingDataPartition.Name)' (partition number $($dataPartition.PartitionNumber)$resolvedDriveLetterLog) for FFU optimization."
         return [int]$dataPartition.PartitionNumber
     }
 

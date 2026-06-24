@@ -3474,6 +3474,8 @@ function Get-FFUOptimizePartitionNumber {
     }
 
     $fillRemainingDataPartition = $null
+    $fillRemainingDataPartitionIndex = -1
+    $dataPartitionIndex = 0
     foreach ($dataPartition in @($AdditionalDataPartitions)) {
         if ($null -eq $dataPartition) { continue }
 
@@ -3484,8 +3486,11 @@ function Get-FFUOptimizePartitionNumber {
 
         if ($fillRemaining) {
             $fillRemainingDataPartition = $dataPartition
+            $fillRemainingDataPartitionIndex = $dataPartitionIndex
             break
         }
+
+        $dataPartitionIndex++
     }
     if ($null -ne $fillRemainingDataPartition) {
         $driveLetter = ([string]$fillRemainingDataPartition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
@@ -3493,32 +3498,28 @@ function Get-FFUOptimizePartitionNumber {
             throw "FillRemaining data partition '$($fillRemainingDataPartition.Name)' does not have a drive letter for FFU optimization."
         }
 
-        $basicDataPartitions = @($Disk | Get-Partition | Where-Object { $_.GptType -eq '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}' })
-        $dataPartition = $basicDataPartitions | Where-Object { ([string]$_.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant() -eq $driveLetter } | Select-Object -First 1
-        if ($null -eq $dataPartition) {
-            $expectedLabels = [System.Collections.Generic.List[string]]::new()
-            foreach ($labelValue in @($fillRemainingDataPartition.Label, $fillRemainingDataPartition.Name)) {
-                $label = ([string]$labelValue).Trim()
-                if (-not [string]::IsNullOrWhiteSpace($label) -and -not $expectedLabels.Contains($label)) {
-                    $expectedLabels.Add($label)
-                }
-            }
-
-            foreach ($partition in $basicDataPartitions) {
-                if ([string]::IsNullOrWhiteSpace([string]$partition.DriveLetter)) { continue }
-                $volume = Get-Volume -DriveLetter $partition.DriveLetter -ErrorAction SilentlyContinue
-                if ($null -eq $volume) { continue }
-
-                if ($expectedLabels -contains ([string]$volume.FileSystemLabel)) {
-                    $dataPartition = $partition
-                    break
-                }
-            }
+        $basicDataPartitions = @($Disk | Get-Partition | Where-Object { $_.GptType -eq '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}' } | Sort-Object -Property PartitionNumber)
+        $windowsPartition = Get-WindowsPartitionFromDisk -Disk $Disk -DriveLetter $WindowsPartitionDriveLetter
+        $dataPartitionsOnDisk = @($basicDataPartitions | Where-Object { $null -eq $windowsPartition -or $_.PartitionNumber -ne $windowsPartition.PartitionNumber } | Sort-Object -Property PartitionNumber)
+        $dataPartition = $null
+        if ($fillRemainingDataPartitionIndex -ge 0 -and $fillRemainingDataPartitionIndex -lt $dataPartitionsOnDisk.Count) {
+            $dataPartition = $dataPartitionsOnDisk[$fillRemainingDataPartitionIndex]
         }
         if ($null -eq $dataPartition) {
-            $expectedLabelText = $expectedLabels -join "' or '"
-            $expectedLabelMessage = if ($expectedLabels.Count -gt 0) { " or label '$expectedLabelText'" } else { '' }
-            throw "Unable to resolve FillRemaining data partition '$($fillRemainingDataPartition.Name)' at drive ${driveLetter}:$expectedLabelMessage for FFU optimization."
+            throw "Unable to resolve FillRemaining data partition '$($fillRemainingDataPartition.Name)' at drive ${driveLetter}: for FFU optimization."
+        }
+
+        $resolvedDriveLetter = ([string]$dataPartition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+        if ($resolvedDriveLetter -ne $driveLetter) {
+            $existingDrive = Get-PSDrive -Name $driveLetter -PSProvider FileSystem -ErrorAction SilentlyContinue
+            if ($null -ne $existingDrive) {
+                throw "Unable to assign drive letter ${driveLetter}: to FillRemaining data partition '$($fillRemainingDataPartition.Name)' for FFU optimization because ${driveLetter}: is already in use."
+            }
+
+            $resolvedDriveLetterLog = if ([string]::IsNullOrWhiteSpace($resolvedDriveLetter)) { 'no drive letter' } else { "drive ${resolvedDriveLetter}:" }
+            WriteLog "Reassigning FillRemaining data partition '$($fillRemainingDataPartition.Name)' from $resolvedDriveLetterLog to drive ${driveLetter}: for FFU optimization."
+            Set-Partition -DiskNumber $dataPartition.DiskNumber -PartitionNumber $dataPartition.PartitionNumber -NewDriveLetter $driveLetter -ErrorAction Stop
+            $dataPartition = Get-Partition -DiskNumber $dataPartition.DiskNumber -PartitionNumber $dataPartition.PartitionNumber -ErrorAction Stop
         }
 
         $resolvedDriveLetter = ([string]$dataPartition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()

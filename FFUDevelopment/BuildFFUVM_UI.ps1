@@ -48,7 +48,8 @@ $script:uiState = [PSCustomObject]@{
         pollTimer                   = $null;
         currentBuildProcess         = $null;
         lastConfigFilePath          = $null;
-        loadedDeviceNamingMode      = $null
+        loadedDeviceNamingMode      = $null;
+        createRecoveryPartition     = $true
     };
     Flags              = @{
         installAppsForcedByUpdates        = $false;
@@ -425,6 +426,12 @@ $script:uiState.Controls.btnRun.Add_Click({
             
             # Gather config on the UI thread before starting the job
             $config = Get-UIConfig -State $script:uiState
+
+            if (-not (Test-DiskLayoutConfiguration -State $script:uiState -Config $config)) {
+                $btnRun.IsEnabled = $true
+                $script:uiState.Controls.txtStatus.Text = "Build canceled: disk layout validation failed."
+                return
+            }
 
             # Validate Additional FFU selection if enabled
             if ($config.BuildUSBDrive -and $config.CopyAdditionalFFUFiles -and (($null -eq $config.AdditionalFFUFiles) -or ($config.AdditionalFFUFiles.Count -eq 0))) {

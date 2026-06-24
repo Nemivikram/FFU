@@ -9,6 +9,8 @@ function Get-UIConfig {
         [Parameter(Mandatory = $true)]
         [psobject]$State
     )
+    Sync-DiskLayoutRowsToControls -State $State
+
     # Create hash to store configuration
     $config = [ordered]@{
         AllowExternalHardDiskMedia     = $State.Controls.chkAllowExternalHardDiskMedia.IsChecked
@@ -51,6 +53,7 @@ function Get-UIConfig {
         Disksize                       = [int64]$State.Controls.txtDiskSize.Text * 1GB
         OSPartitionSize                = ConvertTo-PartitionSizeBytesFromGBText -Text $State.Controls.txtOSPartitionSizeGB.Text -FieldName 'Windows Partition Size'
         RecoveryPartitionSize          = ConvertTo-PartitionSizeBytesFromGBText -Text $State.Controls.txtRecoveryPartitionSizeGB.Text -FieldName 'Recovery Partition Size'
+        CreateRecoveryPartition        = [bool]$State.Data.createRecoveryPartition
         AdditionalDataPartitions       = @(Get-AdditionalDataPartitionConfigRows -State $State)
         DownloadDrivers                = $State.Controls.chkDownloadDrivers.IsChecked
         DriversFolder                  = $State.Controls.txtDriversFolder.Text
@@ -337,6 +340,174 @@ function Get-PartitionSizeGBDisplay {
     return $sizeGb.ToString('0.##', [System.Globalization.CultureInfo]::InvariantCulture)
 }
 
+function Get-PartitionDriveLetterOptions {
+    return @('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z')
+}
+
+function New-DiskLayoutPartitionRow {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PartitionType,
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [string]$Label,
+        [string]$DriveLetter,
+        [string]$SizeGB,
+        [int64]$SizeBytes = 0,
+        [bool]$FillRemaining,
+        [string]$FileSystem = 'NTFS',
+        [bool]$CanSelect,
+        [bool]$CanEditDriveLetter,
+        [bool]$CanEditSize,
+        [bool]$CanEditFillRemaining,
+        [string]$FillRemainingVisibility = 'Visible',
+        [bool]$CanRemove,
+        [bool]$CanReorder
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Label)) {
+        $Label = $Name
+    }
+
+    return [PSCustomObject]@{
+        IsSelected           = $false
+        CanSelect            = $CanSelect
+        PartitionType        = $PartitionType
+        Name                 = $Name
+        Label                = $Label
+        DriveLetter          = $DriveLetter
+        DriveLetterOptions   = @(Get-PartitionDriveLetterOptions)
+        SizeGB               = $SizeGB
+        SizeBytes            = $SizeBytes
+        FillRemaining        = $FillRemaining
+        FillRemainingVisibility = $FillRemainingVisibility
+        FileSystem           = $FileSystem
+        CanEditDriveLetter   = $CanEditDriveLetter
+        CanEditSize          = $CanEditSize
+        CanEditFillRemaining = $CanEditFillRemaining
+        CanRemove            = $CanRemove
+        CanReorder           = $CanReorder
+    }
+}
+
+function Get-ComboBoxDriveLetterValue {
+    param(
+        [object]$ComboBox,
+        [string]$DefaultValue
+    )
+
+    $driveLetter = [string](Get-ComboBoxSelectedContent -ComboBox $ComboBox)
+    if ([string]::IsNullOrWhiteSpace($driveLetter)) {
+        $driveLetter = $DefaultValue
+    }
+
+    return $driveLetter.Trim().TrimEnd(':').ToUpperInvariant()
+}
+
+function Get-DiskLayoutPartitionRows {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$State
+    )
+
+    if ($null -eq $State.Data.additionalDataPartitionsDataList) {
+        $State.Data.additionalDataPartitionsDataList = [System.Collections.Generic.List[PSCustomObject]]::new()
+    }
+    if ($null -eq $State.Data.createRecoveryPartition) {
+        $State.Data.createRecoveryPartition = $true
+    }
+
+    $hasDataPartitions = @($State.Data.additionalDataPartitionsDataList).Count -gt 0
+    $windowsSizeText = [string]$State.Controls.txtOSPartitionSizeGB.Text
+    $windowsCanFillRemaining = -not $hasDataPartitions
+    $windowsFillRemaining = $windowsCanFillRemaining -and [string]::IsNullOrWhiteSpace($windowsSizeText)
+    $windowsFillRemainingVisibility = if ($windowsCanFillRemaining) { 'Visible' } else { 'Hidden' }
+
+    $rows = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $rows.Add((New-DiskLayoutPartitionRow -PartitionType 'System' -Name 'System' -DriveLetter (Get-ComboBoxDriveLetterValue -ComboBox $State.Controls.cmbSystemPartitionDriveLetter -DefaultValue 'S') -SizeGB '0.26' -SizeBytes 260MB -CanEditDriveLetter $true -CanEditSize $false -CanEditFillRemaining $false -FillRemainingVisibility 'Hidden' -CanRemove $false -CanReorder $false))
+    $rows.Add((New-DiskLayoutPartitionRow -PartitionType 'MSR' -Name 'MSR' -SizeGB '0.016' -SizeBytes 16MB -CanEditDriveLetter $false -CanEditSize $false -CanEditFillRemaining $false -FillRemainingVisibility 'Hidden' -CanRemove $false -CanReorder $false))
+    $rows.Add((New-DiskLayoutPartitionRow -PartitionType 'Windows' -Name 'Windows' -DriveLetter (Get-ComboBoxDriveLetterValue -ComboBox $State.Controls.cmbWindowsPartitionDriveLetter -DefaultValue 'W') -SizeGB $windowsSizeText -SizeBytes (ConvertTo-PartitionSizeBytesFromGBText -Text $windowsSizeText -FieldName 'Windows Partition Size') -FillRemaining $windowsFillRemaining -CanEditDriveLetter $true -CanEditSize $true -CanEditFillRemaining $windowsCanFillRemaining -FillRemainingVisibility $windowsFillRemainingVisibility -CanRemove $false -CanReorder $false))
+
+    if ([bool]$State.Data.createRecoveryPartition) {
+        $rows.Add((New-DiskLayoutPartitionRow -PartitionType 'Recovery' -Name 'Recovery' -DriveLetter (Get-ComboBoxDriveLetterValue -ComboBox $State.Controls.cmbRecoveryPartitionDriveLetter -DefaultValue 'R') -SizeGB ([string]$State.Controls.txtRecoveryPartitionSizeGB.Text) -SizeBytes (ConvertTo-PartitionSizeBytesFromGBText -Text $State.Controls.txtRecoveryPartitionSizeGB.Text -FieldName 'Recovery Partition Size') -CanSelect $true -CanEditDriveLetter $true -CanEditSize $true -CanEditFillRemaining $false -FillRemainingVisibility 'Hidden' -CanRemove $true -CanReorder $false))
+    }
+
+    foreach ($dataPartition in @($State.Data.additionalDataPartitionsDataList)) {
+        $rows.Add((New-DiskLayoutPartitionRow -PartitionType 'Data' -Name $dataPartition.Name -Label $dataPartition.Label -DriveLetter $dataPartition.DriveLetter -SizeGB $dataPartition.SizeGB -SizeBytes ([int64]$dataPartition.SizeBytes) -FillRemaining ([bool]$dataPartition.FillRemaining) -FileSystem $dataPartition.FileSystem -CanSelect $true -CanEditDriveLetter $true -CanEditSize $true -CanEditFillRemaining $true -CanRemove $true -CanReorder $true))
+    }
+
+    return $rows.ToArray()
+}
+
+function Sync-DiskLayoutRowsToControls {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$State
+    )
+
+    if ($null -eq $State.Controls.lstDataPartitions) { return }
+    if ($null -eq $State.Data.createRecoveryPartition) {
+        $State.Data.createRecoveryPartition = $true
+    }
+
+    $layoutRows = @($State.Controls.lstDataPartitions.ItemsSource)
+    if ($layoutRows.Count -eq 0) { return }
+
+    $State.Data.createRecoveryPartition = [bool](@($layoutRows | Where-Object { $_.PartitionType -eq 'Recovery' }).Count -gt 0)
+    $updatedDataPartitions = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    foreach ($row in $layoutRows) {
+        switch ($row.PartitionType) {
+            'System' {
+                $row.DriveLetter = ([string]$row.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+                $State.Controls.cmbSystemPartitionDriveLetter.SelectedItem = ($State.Controls.cmbSystemPartitionDriveLetter.Items | Where-Object { $_.Content -eq $row.DriveLetter } | Select-Object -First 1)
+            }
+            'Windows' {
+                $row.DriveLetter = ([string]$row.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+                $State.Controls.cmbWindowsPartitionDriveLetter.SelectedItem = ($State.Controls.cmbWindowsPartitionDriveLetter.Items | Where-Object { $_.Content -eq $row.DriveLetter } | Select-Object -First 1)
+                if ($row.FillRemaining) {
+                    $State.Controls.txtOSPartitionSizeGB.Clear()
+                }
+                else {
+                    $State.Controls.txtOSPartitionSizeGB.Text = [string]$row.SizeGB
+                }
+            }
+            'Recovery' {
+                $row.DriveLetter = ([string]$row.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+                $State.Controls.cmbRecoveryPartitionDriveLetter.SelectedItem = ($State.Controls.cmbRecoveryPartitionDriveLetter.Items | Where-Object { $_.Content -eq $row.DriveLetter } | Select-Object -First 1)
+                $State.Controls.txtRecoveryPartitionSizeGB.Text = [string]$row.SizeGB
+            }
+            'Data' {
+                $row.DriveLetter = ([string]$row.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+                if ($row.FillRemaining) {
+                    $row.SizeGB = ''
+                    $row.SizeBytes = 0
+                }
+                else {
+                    $row.SizeBytes = ConvertTo-PartitionSizeBytesFromGBText -Text $row.SizeGB -FieldName "Data Partition '$($row.Name)' Size"
+                }
+                $updatedDataPartitions.Add([PSCustomObject]@{
+                        Name          = $row.Name
+                        Label         = $row.Label
+                        DriveLetter   = $row.DriveLetter
+                        SizeGB        = $row.SizeGB
+                        SizeBytes     = [int64]$row.SizeBytes
+                        FillRemaining = [bool]$row.FillRemaining
+                        FileSystem    = $row.FileSystem
+                    })
+            }
+        }
+    }
+
+    if ($null -eq $State.Data.additionalDataPartitionsDataList) {
+        $State.Data.additionalDataPartitionsDataList = [System.Collections.Generic.List[PSCustomObject]]::new()
+    }
+    $State.Data.additionalDataPartitionsDataList.Clear()
+    foreach ($dataPartition in $updatedDataPartitions) {
+        $State.Data.additionalDataPartitionsDataList.Add($dataPartition)
+    }
+}
+
 function Update-AdditionalDataPartitionsListView {
     param(
         [Parameter(Mandatory = $true)]
@@ -348,10 +519,359 @@ function Update-AdditionalDataPartitionsListView {
     }
 
     if ($null -ne $State.Controls.lstDataPartitions) {
-        $State.Controls.lstDataPartitions.ItemsSource = $State.Data.additionalDataPartitionsDataList.ToArray()
+        $State.Controls.lstDataPartitions.ItemsSource = @(Get-DiskLayoutPartitionRows -State $State)
         $State.Controls.lstDataPartitions.Items.Refresh()
         Request-ListViewColumnAutoResize -ListView $State.Controls.lstDataPartitions
+        if ($null -ne $State.Controls.chkSelectAllDataPartitions) {
+            Update-SelectAllHeaderCheckBoxState -ListView $State.Controls.lstDataPartitions -HeaderCheckBox $State.Controls.chkSelectAllDataPartitions
+        }
+        Update-DiskLayoutActionButtonsState -State $State
+        Update-DiskLayoutCapacityStatus -State $State
     }
+}
+
+function Get-DiskLayoutSizeDisplay {
+    param(
+        [int64]$SizeBytes
+    )
+
+    $sizeGb = [decimal]$SizeBytes / 1GB
+    return $sizeGb.ToString('0.##', [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Get-DiskLayoutCapacityStatus {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$State
+    )
+
+    try {
+        $diskSizeBytes = ConvertTo-PartitionSizeBytesFromGBText -Text $State.Controls.txtDiskSize.Text -FieldName 'Disk Size'
+    }
+    catch {
+        return [PSCustomObject]@{ Level = 'Red'; Message = $_.Exception.Message }
+    }
+
+    if ($diskSizeBytes -le 0) {
+        return [PSCustomObject]@{ Level = 'Red'; Message = 'Disk Size must be greater than 0 GB.' }
+    }
+
+    $partitionRows = @($State.Controls.lstDataPartitions.ItemsSource)
+    if ($partitionRows.Count -eq 0) {
+        $partitionRows = @(Get-DiskLayoutPartitionRows -State $State)
+    }
+
+    $fixedPartitionSizeBytes = [int64]0
+    $fillRemainingPartitionNames = [System.Collections.Generic.List[string]]::new()
+    $hasAutoSizedRecovery = $false
+    $dataPartitionCount = @($partitionRows | Where-Object { $_.PartitionType -eq 'Data' }).Count
+
+    foreach ($partitionRow in $partitionRows) {
+        if ($partitionRow.PartitionType -eq 'Recovery' -and -not [bool]$State.Data.createRecoveryPartition) { continue }
+
+        if ($partitionRow.FillRemaining) {
+            $fillRemainingPartitionNames.Add([string]$partitionRow.Name)
+            continue
+        }
+
+        if ($partitionRow.PartitionType -eq 'Windows' -and $dataPartitionCount -gt 0 -and [string]::IsNullOrWhiteSpace([string]$partitionRow.SizeGB)) {
+            return [PSCustomObject]@{ Level = 'Red'; Message = 'Set a fixed Windows partition size before adding data partitions.' }
+        }
+
+        if ($partitionRow.PartitionType -eq 'Recovery' -and [string]::IsNullOrWhiteSpace([string]$partitionRow.SizeGB)) {
+            $hasAutoSizedRecovery = $true
+            continue
+        }
+
+        if ($partitionRow.PartitionType -eq 'Data' -and [string]::IsNullOrWhiteSpace([string]$partitionRow.SizeGB)) {
+            return [PSCustomObject]@{ Level = 'Red'; Message = "Data partition '$($partitionRow.Name)' must have a size or Fill Remaining selected." }
+        }
+
+        if (-not [bool]$partitionRow.CanEditSize -and [int64]$partitionRow.SizeBytes -gt 0) {
+            $fixedPartitionSizeBytes += [int64]$partitionRow.SizeBytes
+            continue
+        }
+
+        try {
+            $partitionSizeBytes = ConvertTo-PartitionSizeBytesFromGBText -Text $partitionRow.SizeGB -FieldName "$($partitionRow.Name) Partition Size"
+        }
+        catch {
+            return [PSCustomObject]@{ Level = 'Red'; Message = $_.Exception.Message }
+        }
+
+        if ($partitionSizeBytes -gt 0) {
+            $fixedPartitionSizeBytes += $partitionSizeBytes
+        }
+    }
+
+    if ($fillRemainingPartitionNames.Count -gt 1) {
+        return [PSCustomObject]@{ Level = 'Red'; Message = 'Only one partition can fill remaining disk space.' }
+    }
+
+    if ($fixedPartitionSizeBytes -gt $diskSizeBytes) {
+        $overByBytes = $fixedPartitionSizeBytes - $diskSizeBytes
+        return [PSCustomObject]@{ Level = 'Red'; Message = "Partition sizes exceed Disk Size by $(Get-DiskLayoutSizeDisplay -SizeBytes $overByBytes) GB. Fixed total: $(Get-DiskLayoutSizeDisplay -SizeBytes $fixedPartitionSizeBytes) GB of $(Get-DiskLayoutSizeDisplay -SizeBytes $diskSizeBytes) GB." }
+    }
+
+    $remainingBytes = $diskSizeBytes - $fixedPartitionSizeBytes
+    $remainingPurpose = if ($fillRemainingPartitionNames.Count -gt 0 -and $hasAutoSizedRecovery) {
+        "remaining for $($fillRemainingPartitionNames -join ', ') and the auto-sized Recovery partition"
+    }
+    elseif ($fillRemainingPartitionNames.Count -gt 0) {
+        "remaining for $($fillRemainingPartitionNames -join ', ')"
+    }
+    elseif ($hasAutoSizedRecovery) {
+        'remaining for the auto-sized Recovery partition and unallocated space'
+    }
+    else {
+        'left unallocated'
+    }
+
+    return [PSCustomObject]@{ Level = 'Green'; Message = "Partition sizes fit within Disk Size. $(Get-DiskLayoutSizeDisplay -SizeBytes $remainingBytes) GB $remainingPurpose." }
+}
+
+function Update-DiskLayoutCapacityStatus {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$State
+    )
+
+    if ($null -eq $State.Controls.ellipseDiskLayoutCapacityStatus -or $null -eq $State.Controls.txtDiskLayoutCapacityStatusValue) { return }
+    if ($State.Flags -is [System.Collections.IDictionary] -and $true -eq $State.Flags['updatingDiskLayoutCapacityStatus']) { return }
+
+    try {
+        if ($State.Flags -is [System.Collections.IDictionary]) {
+            $State.Flags['updatingDiskLayoutCapacityStatus'] = $true
+        }
+
+        $capacityStatus = Get-DiskLayoutCapacityStatus -State $State
+        $State.Controls.ellipseDiskLayoutCapacityStatus.Fill = switch ($capacityStatus.Level) {
+            'Green' { [System.Windows.Media.Brushes]::LimeGreen }
+            'Red' { [System.Windows.Media.Brushes]::IndianRed }
+            default { [System.Windows.Media.Brushes]::Gold }
+        }
+        $State.Controls.txtDiskLayoutCapacityStatusValue.Text = $capacityStatus.Message
+    }
+    finally {
+        if ($State.Flags -is [System.Collections.IDictionary]) {
+            $State.Flags['updatingDiskLayoutCapacityStatus'] = $false
+        }
+    }
+}
+
+function Update-DiskLayoutFillRemainingState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$State,
+        [Parameter(Mandatory = $true)]
+        [object]$PartitionRow
+    )
+
+    if ($PartitionRow.FillRemaining) {
+        $PartitionRow.SizeGB = ''
+        $PartitionRow.SizeBytes = 0
+        if ($PartitionRow.PartitionType -eq 'Windows') {
+            $State.Controls.txtOSPartitionSizeGB.Clear()
+        }
+    }
+
+    if ($null -ne $State.Controls.lstDataPartitions) {
+        $State.Controls.lstDataPartitions.Items.Refresh()
+    }
+    Update-DiskLayoutCapacityStatus -State $State
+}
+
+function Update-DiskLayoutActionButtonsState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$State
+    )
+
+    if ($null -eq $State.Controls.lstDataPartitions) { return }
+
+    $selectedItem = $State.Controls.lstDataPartitions.SelectedItem
+    $selectedDataRows = @($State.Controls.lstDataPartitions.Items | Where-Object { $_.PartitionType -eq 'Data' })
+    $selectedDataIndex = -1
+    for ($dataIndex = 0; $dataIndex -lt $selectedDataRows.Count; $dataIndex++) {
+        if ([object]::ReferenceEquals($selectedDataRows[$dataIndex], $selectedItem)) {
+            $selectedDataIndex = $dataIndex
+            break
+        }
+    }
+
+    $canMove = $selectedDataIndex -ge 0
+    if ($null -ne $State.Controls.btnMoveDataPartitionTop) { $State.Controls.btnMoveDataPartitionTop.IsEnabled = $canMove -and $selectedDataIndex -gt 0 }
+    if ($null -ne $State.Controls.btnMoveDataPartitionUp) { $State.Controls.btnMoveDataPartitionUp.IsEnabled = $canMove -and $selectedDataIndex -gt 0 }
+    if ($null -ne $State.Controls.btnMoveDataPartitionDown) { $State.Controls.btnMoveDataPartitionDown.IsEnabled = $canMove -and $selectedDataIndex -lt ($selectedDataRows.Count - 1) }
+    if ($null -ne $State.Controls.btnMoveDataPartitionBottom) { $State.Controls.btnMoveDataPartitionBottom.IsEnabled = $canMove -and $selectedDataIndex -lt ($selectedDataRows.Count - 1) }
+
+    if ($null -ne $State.Controls.btnRestoreRecoveryPartition) {
+        $State.Controls.btnRestoreRecoveryPartition.Visibility = if ([bool]$State.Data.createRecoveryPartition) { 'Collapsed' } else { 'Visible' }
+        $State.Controls.btnRestoreRecoveryPartition.IsEnabled = -not [bool]$State.Data.createRecoveryPartition
+    }
+}
+
+function Move-DataPartitionRow {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$State,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Top', 'Up', 'Down', 'Bottom')]
+        [string]$Direction
+    )
+
+    $selectedItem = $State.Controls.lstDataPartitions.SelectedItem
+    if ($null -eq $selectedItem -or $selectedItem.PartitionType -ne 'Data') { return }
+
+    Sync-DiskLayoutRowsToControls -State $State
+    $dataRows = @($State.Controls.lstDataPartitions.Items | Where-Object { $_.PartitionType -eq 'Data' })
+    $currentIndex = -1
+    for ($dataIndex = 0; $dataIndex -lt $dataRows.Count; $dataIndex++) {
+        if ([object]::ReferenceEquals($dataRows[$dataIndex], $selectedItem)) {
+            $currentIndex = $dataIndex
+            break
+        }
+    }
+
+    if ($currentIndex -lt 0) { return }
+
+    $targetIndex = switch ($Direction) {
+        'Top' { 0 }
+        'Up' { [Math]::Max(0, $currentIndex - 1) }
+        'Down' { [Math]::Min($State.Data.additionalDataPartitionsDataList.Count - 1, $currentIndex + 1) }
+        'Bottom' { $State.Data.additionalDataPartitionsDataList.Count - 1 }
+    }
+
+    if ($targetIndex -eq $currentIndex) { return }
+
+    $movingItem = $State.Data.additionalDataPartitionsDataList[$currentIndex]
+    $State.Data.additionalDataPartitionsDataList.RemoveAt($currentIndex)
+    $State.Data.additionalDataPartitionsDataList.Insert($targetIndex, $movingItem)
+    Update-AdditionalDataPartitionsListView -State $State
+
+    $updatedDataRows = @($State.Controls.lstDataPartitions.Items | Where-Object { $_.PartitionType -eq 'Data' })
+    if ($targetIndex -ge 0 -and $targetIndex -lt $updatedDataRows.Count) {
+        $State.Controls.lstDataPartitions.SelectedItem = $updatedDataRows[$targetIndex]
+    }
+
+    Update-DiskLayoutActionButtonsState -State $State
+}
+
+function Clear-AdditionalDataPartitions {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$State
+    )
+
+    $result = [System.Windows.MessageBox]::Show("Are you sure you want to clear all additional data partitions?", "Clear Data Partitions", [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Question)
+    if ($result -ne [System.Windows.MessageBoxResult]::Yes) { return }
+
+    if ($null -eq $State.Data.additionalDataPartitionsDataList) {
+        $State.Data.additionalDataPartitionsDataList = [System.Collections.Generic.List[PSCustomObject]]::new()
+    }
+    $State.Data.additionalDataPartitionsDataList.Clear()
+    Clear-AdditionalDataPartitionForm -State $State
+    Update-AdditionalDataPartitionsListView -State $State
+
+    if ($null -ne $State.Controls.txtStatus) {
+        $State.Controls.txtStatus.Text = "Additional data partitions list cleared."
+    }
+}
+
+function Restore-RecoveryPartition {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$State
+    )
+
+    $State.Data.createRecoveryPartition = $true
+    Update-AdditionalDataPartitionsListView -State $State
+}
+
+function Test-DiskLayoutConfiguration {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$State,
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary]$Config
+    )
+
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $driveLetterEntries = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    $partitionRows = @($State.Controls.lstDataPartitions.ItemsSource)
+    foreach ($partitionRow in $partitionRows) {
+        if ($partitionRow.PartitionType -eq 'MSR') { continue }
+        if ($partitionRow.PartitionType -eq 'Recovery' -and -not [bool]$Config.CreateRecoveryPartition) { continue }
+
+        $driveLetter = ([string]$partitionRow.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+        if ([string]::IsNullOrWhiteSpace($driveLetter) -or $driveLetter -notmatch '^[A-Z]$') {
+            $errors.Add("$($partitionRow.Name) must use a single drive letter from A to Z.")
+            continue
+        }
+
+        $driveLetterEntries.Add([PSCustomObject]@{
+                Name        = $partitionRow.Name
+                DriveLetter = $driveLetter
+            })
+    }
+
+    $duplicateDriveLetters = @($driveLetterEntries | Group-Object -Property DriveLetter | Where-Object { $_.Count -gt 1 })
+    foreach ($duplicateDriveLetter in $duplicateDriveLetters) {
+        $partitionNames = ($duplicateDriveLetter.Group | ForEach-Object { $_.Name }) -join ', '
+        $errors.Add("Drive letter $($duplicateDriveLetter.Name) is used by multiple partitions: $partitionNames.")
+    }
+
+    $dataPartitions = @($Config.AdditionalDataPartitions)
+    if ($dataPartitions.Count -gt 0 -and $Config.OSPartitionSize -le 0) {
+        $errors.Add('Windows must use a fixed size when data partitions are configured.')
+    }
+
+    $fillRemainingCount = 0
+    if ($Config.OSPartitionSize -le 0) {
+        $fillRemainingCount++
+    }
+    $fillRemainingCount += @($dataPartitions | Where-Object { $_.FillRemaining }).Count
+    if ($fillRemainingCount -gt 1) {
+        $errors.Add('Only one partition can fill remaining disk space.')
+    }
+
+    $duplicateDataNames = @($dataPartitions | Group-Object -Property Name | Where-Object { $_.Count -gt 1 })
+    foreach ($duplicateDataName in $duplicateDataNames) {
+        $errors.Add("Data partition name '$($duplicateDataName.Name)' is used more than once.")
+    }
+
+    [uint64]$fixedPartitionSizeBytes = 260MB + 16MB
+    if ($Config.OSPartitionSize -gt 0) {
+        $fixedPartitionSizeBytes += [uint64]$Config.OSPartitionSize
+    }
+    if ([bool]$Config.CreateRecoveryPartition -and $Config.RecoveryPartitionSize -gt 0) {
+        $fixedPartitionSizeBytes += [uint64]$Config.RecoveryPartitionSize
+    }
+    foreach ($dataPartition in $dataPartitions) {
+        if ($dataPartition.FillRemaining) { continue }
+        if ([uint64]$dataPartition.SizeBytes -le 0) {
+            $errors.Add("Data partition '$($dataPartition.Name)' must have a size or Fill Remaining selected.")
+            continue
+        }
+        $fixedPartitionSizeBytes += [uint64]$dataPartition.SizeBytes
+    }
+
+    if ([uint64]$Config.Disksize -le 0) {
+        $errors.Add('Disk Size must be greater than 0 GB.')
+    }
+    elseif ($fixedPartitionSizeBytes -gt [uint64]$Config.Disksize) {
+        $fixedPartitionSizeGB = [Math]::Round(($fixedPartitionSizeBytes / 1GB), 2)
+        $diskSizeGB = [Math]::Round(([uint64]$Config.Disksize / 1GB), 2)
+        $errors.Add("Fixed partition sizes total $fixedPartitionSizeGB GB, which exceeds the configured disk size of $diskSizeGB GB.")
+    }
+
+    if ($errors.Count -gt 0) {
+        [System.Windows.MessageBox]::Show(($errors -join [System.Environment]::NewLine), "Disk Layout Validation", "OK", "Warning") | Out-Null
+        return $false
+    }
+
+    return $true
 }
 
 function Clear-AdditionalDataPartitionForm {
@@ -371,6 +891,14 @@ function Add-AdditionalDataPartition {
         [Parameter(Mandatory = $true)]
         [psobject]$State
     )
+
+    try {
+        Sync-DiskLayoutRowsToControls -State $State
+    }
+    catch {
+        [System.Windows.MessageBox]::Show($_.Exception.Message, "Disk Layout", "OK", "Warning") | Out-Null
+        return $false
+    }
 
     if ($null -eq $State.Data.additionalDataPartitionsDataList) {
         $State.Data.additionalDataPartitionsDataList = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -395,8 +923,15 @@ function Add-AdditionalDataPartition {
     $reservedDriveLetters = @(
         Get-ComboBoxSelectedContent -ComboBox $State.Controls.cmbSystemPartitionDriveLetter
         Get-ComboBoxSelectedContent -ComboBox $State.Controls.cmbWindowsPartitionDriveLetter
-        Get-ComboBoxSelectedContent -ComboBox $State.Controls.cmbRecoveryPartitionDriveLetter
     ) | ForEach-Object { ([string]$_).Trim().TrimEnd(':').ToUpperInvariant() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    if ([bool]$State.Data.createRecoveryPartition) {
+        $reservedDriveLetters += ([string](Get-ComboBoxSelectedContent -ComboBox $State.Controls.cmbRecoveryPartitionDriveLetter)).Trim().TrimEnd(':').ToUpperInvariant()
+    }
+
+    if ([string]::IsNullOrWhiteSpace([string]$State.Controls.txtOSPartitionSizeGB.Text)) {
+        [System.Windows.MessageBox]::Show("Set a fixed Windows partition size before adding data partitions. Windows can fill remaining space only when no data partitions are configured.", "Windows Partition Size Required", "OK", "Warning") | Out-Null
+        return $false
+    }
 
     if ($reservedDriveLetters -contains $driveLetter) {
         [System.Windows.MessageBox]::Show("Drive letter $driveLetter is already used by a required build partition.", "Duplicate Drive Letter", "OK", "Warning") | Out-Null
@@ -474,14 +1009,22 @@ function Remove-SelectedDataPartition {
         [psobject]$State
     )
 
-    $itemsToRemove = @($State.Controls.lstDataPartitions.SelectedItems)
+    $itemsToRemove = @($State.Controls.lstDataPartitions.Items | Where-Object { $_.IsSelected -and $_.CanRemove })
     if ($itemsToRemove.Count -eq 0) {
-        [System.Windows.MessageBox]::Show("Please select one or more data partitions to remove.", "Selection Required", "OK", "Warning") | Out-Null
+        [System.Windows.MessageBox]::Show("Select one or more removable partitions to remove.", "Selection Required", "OK", "Warning") | Out-Null
         return
     }
 
     foreach ($itemToRemove in $itemsToRemove) {
-        $State.Data.additionalDataPartitionsDataList.Remove($itemToRemove) | Out-Null
+        if ($itemToRemove.PartitionType -eq 'Recovery') {
+            $State.Data.createRecoveryPartition = $false
+        }
+        elseif ($itemToRemove.PartitionType -eq 'Data') {
+            $dataItem = @($State.Data.additionalDataPartitionsDataList | Where-Object { $_.Name -eq $itemToRemove.Name -and $_.DriveLetter -eq $itemToRemove.DriveLetter } | Select-Object -First 1)
+            if ($dataItem.Count -gt 0) {
+                $State.Data.additionalDataPartitionsDataList.Remove($dataItem[0]) | Out-Null
+            }
+        }
     }
 
     Update-AdditionalDataPartitionsListView -State $State
@@ -496,6 +1039,8 @@ function Get-AdditionalDataPartitionConfigRows {
     if ($null -eq $State.Data.additionalDataPartitionsDataList) {
         return @()
     }
+
+    Sync-DiskLayoutRowsToControls -State $State
 
     return @($State.Data.additionalDataPartitionsDataList | ForEach-Object {
             [PSCustomObject]@{
@@ -836,10 +1381,16 @@ function Update-UIFromConfig {
     Set-UIValue -ControlName 'txtVMNamePrefix' -PropertyName 'Text' -ConfigObject $ConfigContent -ConfigKey 'FFUPrefix' -State $State
     Set-UIValue -ControlName 'txtOSPartitionSizeGB' -PropertyName 'Text' -ConfigObject $ConfigContent -ConfigKey 'OSPartitionSize' -TransformValue { param($val) Get-PartitionSizeGBDisplay -SizeBytes $val } -State $State
     Set-UIValue -ControlName 'txtRecoveryPartitionSizeGB' -PropertyName 'Text' -ConfigObject $ConfigContent -ConfigKey 'RecoveryPartitionSize' -TransformValue { param($val) Get-PartitionSizeGBDisplay -SizeBytes $val } -State $State
-    Import-AdditionalDataPartitionsFromConfig -State $State -ConfigContent $ConfigContent
+    if ($ConfigContent.PSObject.Properties.Name -contains 'CreateRecoveryPartition') {
+        $State.Data.createRecoveryPartition = [System.Convert]::ToBoolean($ConfigContent.CreateRecoveryPartition)
+    }
+    else {
+        $State.Data.createRecoveryPartition = $true
+    }
     Set-UIValue -ControlName 'cmbSystemPartitionDriveLetter' -PropertyName 'SelectedItem' -ConfigObject $ConfigContent -ConfigKey 'SystemPartitionDriveLetter' -TransformValue { param($val) ([string]$val).Trim().TrimEnd(':').ToUpperInvariant() } -State $State
     Set-UIValue -ControlName 'cmbWindowsPartitionDriveLetter' -PropertyName 'SelectedItem' -ConfigObject $ConfigContent -ConfigKey 'WindowsPartitionDriveLetter' -TransformValue { param($val) ([string]$val).Trim().TrimEnd(':').ToUpperInvariant() } -State $State
     Set-UIValue -ControlName 'cmbRecoveryPartitionDriveLetter' -PropertyName 'SelectedItem' -ConfigObject $ConfigContent -ConfigKey 'RecoveryPartitionDriveLetter' -TransformValue { param($val) ([string]$val).Trim().TrimEnd(':').ToUpperInvariant() } -State $State
+    Import-AdditionalDataPartitionsFromConfig -State $State -ConfigContent $ConfigContent
     Set-UIValue -ControlName 'cmbLogicalSectorSize' -PropertyName 'SelectedItem' -ConfigObject $ConfigContent -ConfigKey 'LogicalSectorSizeBytes' -TransformValue { param($val) $val.ToString() } -State $State
     $State.Controls.spVMNetworkingSettings.IsEnabled = $true -eq $State.Controls.chkEnableVMNetworking.IsChecked
     if (-not ($true -eq $State.Controls.chkEnableVMNetworking.IsChecked)) {

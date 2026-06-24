@@ -23,10 +23,6 @@ Drop down of detected VM Switches. There's also an **Other** option which allows
 
 This setting is only used when **Enable VM Networking (Experimental)** is turned on. VM-based builds still capture from the host-side VHDX after the VM shuts down, so you only need a switch when the VM requires network connectivity during provisioning.
 
-## Disk Size (GB)
-
-Size of the virtual hard disk for the virtual machine. Default is a 50GB dynamic disk. You may want to increase the size if you're installing many apps.
-
 ## Memory (GB)
 
 Amount of memory to allocate for the virtual machine. Recommended to use 8GB if possible, especially for Windows 11. Default is 4GB.
@@ -43,29 +39,23 @@ Default is `$FFUDevelopmentPath\VM`. This is the location of the VHDX that gets 
 
 Prefix for the generated VM. Default is _FFU.
 
-## System Partition Drive Letter
+## Disk Layout
 
-Drive letter used for the System partition while building the FFU VHDX. Default is `S`.
+Configures the VHDX size and the build-time partition layout used for the captured FFU.
 
-## Windows Partition Drive Letter
+**Disk Size (GB)** sets the virtual hard disk size for the VM. Default is a 50GB dynamic disk. Increase this when the image needs more space for Windows, apps, updates, or data partitions.
 
-Drive letter used for the Windows partition while building the FFU VHDX. Default is `W`.
+The partition list shows the build order: System, MSR, Windows, Recovery, and optional data partitions. System, Windows, and Recovery have editable build-time drive letters. Defaults are `S`, `W`, and `R`. The MSR row is display-only, fixed at 16MB, and does not use a drive letter.
 
-## Recovery Partition Drive Letter
+These drive letters only affect FFU creation. The deployment script discovers the Windows and Recovery partitions from the applied disk instead of relying on fixed partition numbers.
 
-Drive letter used for the Recovery partition while building the FFU VHDX. Default is `R`.
+Leave the Windows size blank to let Windows fill the remaining disk. Set a fixed Windows size before adding data partitions so the VHDX has space left for Recovery and data volumes.
 
-These settings only affect FFU creation. The deployment script discovers the Windows and Recovery partitions from the applied disk instead of relying on fixed partition numbers.
+Use the Recovery size only when you need a fixed Recovery partition size. Leave it blank to let the build calculate the Recovery size from `winre.wim` plus buffer space.
 
-## Additional Data Partitions
+The Recovery partition can be removed by selecting its row checkbox and using **Remove Selected**. Use **Restore Recovery** to add it back before saving or building. Removing Recovery saves `CreateRecoveryPartition` as `false` in the generated config.
 
-Creates optional data partitions after the Windows Recovery partition. This keeps Recovery immediately after Windows, which leaves the normal WinRE layout intact while still allowing one or more data volumes in the captured FFU.
-
-Set **Windows Partition Size (GB)** before adding data partitions. Without an explicit Windows partition size, Windows would consume the remaining VHDX space and there would be no room left for Recovery and data partitions.
-
-Use **Recovery Partition Size (GB)** only when you need a fixed Recovery partition size. Leave it blank to let the build calculate the Recovery size from `winre.wim` plus buffer space.
-
-Each data partition has a name, build-time drive letter, and either a size in GB or **Fill Remaining**. Only one data partition can use **Fill Remaining**. Fixed-size data partitions are created before the fill-remaining data partition so the fill-remaining volume does not consume space reserved for later fixed-size volumes.
+Each data partition has a name, build-time drive letter, and either a size in GB or **Fill Remaining**. Only one data partition can use **Fill Remaining**. Data partitions can be reordered with the arrow buttons. **Clear** removes only data partitions, not the base partition rows.
 
 The Apps ISO drive letter is discovered at runtime. If you create a data partition that uses `D:`, application installs should use `%FFUAppsRoot%` for Apps ISO paths. Legacy `D:\` paths in `UserAppList.json` are still supported when they point to files on the Apps ISO.
 

@@ -111,6 +111,9 @@ Fixed size of the Windows partition in bytes. Required when AdditionalDataPartit
 .PARAMETER RecoveryPartitionSize
 Optional fixed size of the Recovery partition in bytes. Leave as 0 to calculate the Recovery partition size from winre.wim plus buffer space.
 
+.PARAMETER CreateRecoveryPartition
+When set to $false, skips creating the Windows Recovery partition. Default is $true.
+
 .PARAMETER AdditionalDataPartitions
 Optional data partitions to create after the Recovery partition. Each item supports Name, Label, DriveLetter, SizeBytes or SizeGB, FillRemaining, and FileSystem.
 
@@ -187,7 +190,7 @@ Path to a custom Office configuration XML file to use for installation.
 When set to $true, will optimize the FFU file. Default is $true.
 
 .PARAMETER OptimizeFFUPartitionNumber
-Optional partition number to pass to DISM /Optimize-FFU /PartitionNumber. Leave as 0 to optimize with DISM defaults.
+Optional partition number to pass to DISM /Optimize-FFU /PartitionNumber. Leave as 0 to optimize the FillRemaining partition, or Windows when no partition uses FillRemaining.
 
 .PARAMETER OptionalFeatures
 Provide a semicolon-separated list of Windows optional features you want to include in the FFU (e.g., netfx3;TFTP).
@@ -366,6 +369,7 @@ param(
     [uint64]$Disksize = 50GB,
     [uint64]$OSPartitionSize = 0,
     [uint64]$RecoveryPartitionSize = 0,
+    [bool]$CreateRecoveryPartition = $true,
     [object[]]$AdditionalDataPartitions = @(),
     [int]$Processors = 4,
     [bool]$EnableVMNetworking,
@@ -898,6 +902,7 @@ class VhdxCacheItem {
     [string]$VhdxFileName = ""
     [uint32]$LogicalSectorSizeBytes = ""
     [uint64]$Disksize = ""
+    [bool]$CreateRecoveryPartition = $true
     [string]$SystemPartitionDriveLetter = ""
     [string]$WindowsPartitionDriveLetter = ""
     [string]$RecoveryPartitionDriveLetter = ""
@@ -3089,14 +3094,17 @@ function Get-NormalizedPartitionDriveLetters {
         [string]$SystemPartitionDriveLetter,
         [string]$WindowsPartitionDriveLetter,
         [string]$RecoveryPartitionDriveLetter,
+        [bool]$CreateRecoveryPartition = $true,
         [object[]]$AdditionalDataPartitions = @(),
         [switch]$ValidateAvailable
     )
 
     $requestedLetters = [ordered]@{
-        SystemPartitionDriveLetter   = $SystemPartitionDriveLetter
-        WindowsPartitionDriveLetter  = $WindowsPartitionDriveLetter
-        RecoveryPartitionDriveLetter = $RecoveryPartitionDriveLetter
+        SystemPartitionDriveLetter  = $SystemPartitionDriveLetter
+        WindowsPartitionDriveLetter = $WindowsPartitionDriveLetter
+    }
+    if ($CreateRecoveryPartition) {
+        $requestedLetters['RecoveryPartitionDriveLetter'] = $RecoveryPartitionDriveLetter
     }
     foreach ($dataPartition in @($AdditionalDataPartitions)) {
         if ($null -eq $dataPartition) { continue }
@@ -3123,7 +3131,7 @@ function Get-NormalizedPartitionDriveLetters {
     $duplicateLetters = @($normalizedLetters.Values | Group-Object | Where-Object { $_.Count -gt 1 })
     if ($duplicateLetters.Count -gt 0) {
         $duplicateLetterList = ($duplicateLetters | ForEach-Object { $_.Name }) -join ', '
-        throw "System, Windows, and Recovery partition drive letters must be unique. Duplicate value(s): $duplicateLetterList."
+        throw "Build partition drive letters must be unique. Duplicate value(s): $duplicateLetterList."
     }
 
     if ($ValidateAvailable) {
@@ -3229,6 +3237,7 @@ function Get-PartitionLayoutSignature {
     param(
         [uint64]$OSPartitionSize,
         [uint64]$RecoveryPartitionSize,
+        [bool]$CreateRecoveryPartition = $true,
         [object[]]$DataPartitions = @()
     )
 
@@ -3236,7 +3245,7 @@ function Get-PartitionLayoutSignature {
         "$($_.Name)|$($_.Label)|$($_.DriveLetter)|$($_.FileSystem)|$($_.SizeBytes)|$($_.FillRemaining)"
     })
 
-    return "OS=$OSPartitionSize;Recovery=$RecoveryPartitionSize;Data=$($dataPartitionSignatures -join ';')"
+    return "OS=$OSPartitionSize;CreateRecovery=$CreateRecoveryPartition;Recovery=$RecoveryPartitionSize;Data=$($dataPartitionSignatures -join ';')"
 }
 function Get-PartitionDriveLetterCacheValue {
     param(
@@ -3450,6 +3459,56 @@ function Get-WindowsPartitionFromDisk {
     }
 
     return $basicDataPartitions | Select-Object -First 1
+}
+function Get-FFUOptimizePartitionNumber {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ciminstance]$Disk,
+        [int]$RequestedPartitionNumber = 0,
+        [string]$WindowsPartitionDriveLetter,
+        [object[]]$AdditionalDataPartitions = @()
+    )
+
+    if ($RequestedPartitionNumber -gt 0) {
+        return $RequestedPartitionNumber
+    }
+
+    $fillRemainingDataPartition = $null
+    foreach ($dataPartition in @($AdditionalDataPartitions)) {
+        if ($null -eq $dataPartition) { continue }
+
+        $fillRemaining = $false
+        if ($dataPartition.PSObject.Properties.Name -contains 'FillRemaining') {
+            $fillRemaining = [System.Convert]::ToBoolean($dataPartition.FillRemaining)
+        }
+
+        if ($fillRemaining) {
+            $fillRemainingDataPartition = $dataPartition
+            break
+        }
+    }
+    if ($null -ne $fillRemainingDataPartition) {
+        $driveLetter = ([string]$fillRemainingDataPartition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+        if ([string]::IsNullOrWhiteSpace($driveLetter)) {
+            throw "FillRemaining data partition '$($fillRemainingDataPartition.Name)' does not have a drive letter for FFU optimization."
+        }
+
+        $dataPartition = $Disk | Get-Partition | Where-Object { ([string]$_.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant() -eq $driveLetter } | Select-Object -First 1
+        if ($null -eq $dataPartition) {
+            throw "Unable to resolve FillRemaining data partition '$($fillRemainingDataPartition.Name)' at drive ${driveLetter}: for FFU optimization."
+        }
+
+        WriteLog "Using FillRemaining data partition '$($fillRemainingDataPartition.Name)' (partition number $($dataPartition.PartitionNumber)) for FFU optimization."
+        return [int]$dataPartition.PartitionNumber
+    }
+
+    $windowsPartition = Get-WindowsPartitionFromDisk -Disk $Disk -DriveLetter $WindowsPartitionDriveLetter
+    if ($null -eq $windowsPartition) {
+        throw 'Unable to resolve Windows partition for FFU optimization.'
+    }
+
+    WriteLog "Using Windows partition (partition number $($windowsPartition.PartitionNumber)) for FFU optimization."
+    return [int]$windowsPartition.PartitionNumber
 }
 #Add boot files
 function Add-BootFiles {
@@ -4400,6 +4459,10 @@ function New-FFUFileName {
 function New-FFU {
     $captureContext = Get-CaptureVhdContext -VhdxPath $VHDXPath
     $captureDisk = $captureContext.Disk
+    $resolvedFFUOptimizePartitionNumber = 0
+    if ($Optimize -eq $true) {
+        $resolvedFFUOptimizePartitionNumber = Get-FFUOptimizePartitionNumber -Disk $captureDisk -RequestedPartitionNumber $OptimizeFFUPartitionNumber -WindowsPartitionDriveLetter $WindowsPartitionDriveLetter -AdditionalDataPartitions $normalizedAdditionalDataPartitions
+    }
     $ffuCaptureNamingInfo = Get-FFUCaptureNamingInfo -ShortenedWindowsSKU $shortenedWindowsSKU -WindowsRelease $WindowsRelease -WindowsVersion $WindowsVersion -InstallationType $installationType -IsWindows10LtscClient:$isWindows10LtscClient
 
     try {
@@ -4461,9 +4524,9 @@ function New-FFU {
         Set-Progress -Percentage 85 -Message "Optimizing FFU..."
         WriteLog 'Optimizing FFU - This will take a few minutes, please be patient'
         #Need to use ADK version of DISM to address bug in DISM - perhaps Windows 11 24H2 will fix this
-        $optimizePartitionArgument = if ($OptimizeFFUPartitionNumber -gt 0) { " /PartitionNumber:$OptimizeFFUPartitionNumber" } else { '' }
+        $optimizePartitionArgument = if ($resolvedFFUOptimizePartitionNumber -gt 0) { " /PartitionNumber:$resolvedFFUOptimizePartitionNumber" } else { '' }
         if (-not [string]::IsNullOrWhiteSpace($optimizePartitionArgument)) {
-            WriteLog "Optimizing FFU with DISM partition number $OptimizeFFUPartitionNumber."
+            WriteLog "Optimizing FFU with DISM partition number $resolvedFFUOptimizePartitionNumber."
         }
         Invoke-Process cmd "/c ""$DandIEnv"" && dism /optimize-ffu /imagefile:$FFUFile$optimizePartitionArgument" | Out-Null
         #Invoke-Process cmd "/c dism /optimize-ffu /imagefile:$FFUFile" | Out-Null
@@ -6177,16 +6240,25 @@ Set-Progress -Percentage 2 -Message "Validating parameters..."
 try {
     $normalizedAdditionalDataPartitions = ConvertTo-NormalizedDataPartitions -DataPartitions $AdditionalDataPartitions
     if ($normalizedAdditionalDataPartitions.Count -gt 0 -and $OSPartitionSize -le 0) {
-        throw 'OSPartitionSize must be set when AdditionalDataPartitions are configured so space remains for Recovery and data partitions.'
+        $osPartitionSizeMessage = if ($CreateRecoveryPartition) {
+            'OSPartitionSize must be set when AdditionalDataPartitions are configured so space remains for Recovery and data partitions.'
+        }
+        else {
+            'OSPartitionSize must be set when AdditionalDataPartitions are configured so space remains for data partitions.'
+        }
+        throw $osPartitionSizeMessage
     }
-    $partitionLayoutSignature = Get-PartitionLayoutSignature -OSPartitionSize $OSPartitionSize -RecoveryPartitionSize $RecoveryPartitionSize -DataPartitions $normalizedAdditionalDataPartitions
+    $partitionLayoutSignature = Get-PartitionLayoutSignature -OSPartitionSize $OSPartitionSize -RecoveryPartitionSize $RecoveryPartitionSize -CreateRecoveryPartition $CreateRecoveryPartition -DataPartitions $normalizedAdditionalDataPartitions
 
-    $partitionDriveLetters = Get-NormalizedPartitionDriveLetters -SystemPartitionDriveLetter $SystemPartitionDriveLetter -WindowsPartitionDriveLetter $WindowsPartitionDriveLetter -RecoveryPartitionDriveLetter $RecoveryPartitionDriveLetter -AdditionalDataPartitions $normalizedAdditionalDataPartitions -ValidateAvailable
+    $partitionDriveLetters = Get-NormalizedPartitionDriveLetters -SystemPartitionDriveLetter $SystemPartitionDriveLetter -WindowsPartitionDriveLetter $WindowsPartitionDriveLetter -RecoveryPartitionDriveLetter $RecoveryPartitionDriveLetter -CreateRecoveryPartition $CreateRecoveryPartition -AdditionalDataPartitions $normalizedAdditionalDataPartitions -ValidateAvailable
     $SystemPartitionDriveLetter = $partitionDriveLetters.SystemPartitionDriveLetter
     $WindowsPartitionDriveLetter = $partitionDriveLetters.WindowsPartitionDriveLetter
-    $RecoveryPartitionDriveLetter = $partitionDriveLetters.RecoveryPartitionDriveLetter
+    if ($CreateRecoveryPartition) {
+        $RecoveryPartitionDriveLetter = $partitionDriveLetters.RecoveryPartitionDriveLetter
+    }
     $dataPartitionDriveLetterLog = if ($normalizedAdditionalDataPartitions.Count -gt 0) { ', Data=' + (($normalizedAdditionalDataPartitions | ForEach-Object { "$($_.Name):$($_.DriveLetter)" }) -join ', ') } else { '' }
-    WriteLog "Using build partition drive letters: System=$SystemPartitionDriveLetter, Windows=$WindowsPartitionDriveLetter, Recovery=$RecoveryPartitionDriveLetter$dataPartitionDriveLetterLog"
+    $recoveryPartitionDriveLetterLog = if ($CreateRecoveryPartition) { ", Recovery=$RecoveryPartitionDriveLetter" } else { ', Recovery=disabled' }
+    WriteLog "Using build partition drive letters: System=$SystemPartitionDriveLetter, Windows=$WindowsPartitionDriveLetter$recoveryPartitionDriveLetterLog$dataPartitionDriveLetterLog"
 }
 catch {
     $partitionDriveLetterValidationError = "Build validation failed: $($_.Exception.Message)"
@@ -7486,15 +7558,19 @@ try {
                     [uint64]$cachedDisksize = 0
                     if (-not [uint64]::TryParse([string]$vhdxCacheItem.Disksize, [ref]$cachedDisksize)) { WriteLog "Disksize invalid in cached config ($($vhdxCacheItem.Disksize)), continuing"; continue }
                     if ($cachedDisksize -ne $Disksize) { WriteLog "Disksize mismatch (cached: $cachedDisksize, current: $Disksize), continuing"; continue }
+                    if ($vhdxCacheItem.PSObject.Properties.Name -notcontains 'CreateRecoveryPartition') { WriteLog 'CreateRecoveryPartition missing in cached config, continuing'; continue }
+                    if ([bool]$vhdxCacheItem.CreateRecoveryPartition -ne $CreateRecoveryPartition) { WriteLog "CreateRecoveryPartition mismatch (cached: $($vhdxCacheItem.CreateRecoveryPartition), current: $CreateRecoveryPartition), continuing"; continue }
                     if ($vhdxCacheItem.PSObject.Properties.Name -notcontains 'SystemPartitionDriveLetter') { WriteLog 'SystemPartitionDriveLetter missing in cached config, continuing'; continue }
                     if ($vhdxCacheItem.PSObject.Properties.Name -notcontains 'WindowsPartitionDriveLetter') { WriteLog 'WindowsPartitionDriveLetter missing in cached config, continuing'; continue }
-                    if ($vhdxCacheItem.PSObject.Properties.Name -notcontains 'RecoveryPartitionDriveLetter') { WriteLog 'RecoveryPartitionDriveLetter missing in cached config, continuing'; continue }
+                    if ($CreateRecoveryPartition -and $vhdxCacheItem.PSObject.Properties.Name -notcontains 'RecoveryPartitionDriveLetter') { WriteLog 'RecoveryPartitionDriveLetter missing in cached config, continuing'; continue }
                     $cachedSystemPartitionDriveLetter = Get-PartitionDriveLetterCacheValue -DriveLetterValue $vhdxCacheItem.SystemPartitionDriveLetter
                     $cachedWindowsPartitionDriveLetter = Get-PartitionDriveLetterCacheValue -DriveLetterValue $vhdxCacheItem.WindowsPartitionDriveLetter
-                    $cachedRecoveryPartitionDriveLetter = Get-PartitionDriveLetterCacheValue -DriveLetterValue $vhdxCacheItem.RecoveryPartitionDriveLetter
                     if ($cachedSystemPartitionDriveLetter -ne $SystemPartitionDriveLetter) { WriteLog "SystemPartitionDriveLetter mismatch (cached: $($vhdxCacheItem.SystemPartitionDriveLetter), current: $SystemPartitionDriveLetter), continuing"; continue }
                     if ($cachedWindowsPartitionDriveLetter -ne $WindowsPartitionDriveLetter) { WriteLog "WindowsPartitionDriveLetter mismatch (cached: $($vhdxCacheItem.WindowsPartitionDriveLetter), current: $WindowsPartitionDriveLetter), continuing"; continue }
-                    if ($cachedRecoveryPartitionDriveLetter -ne $RecoveryPartitionDriveLetter) { WriteLog "RecoveryPartitionDriveLetter mismatch (cached: $($vhdxCacheItem.RecoveryPartitionDriveLetter), current: $RecoveryPartitionDriveLetter), continuing"; continue }
+                    if ($CreateRecoveryPartition) {
+                        $cachedRecoveryPartitionDriveLetter = Get-PartitionDriveLetterCacheValue -DriveLetterValue $vhdxCacheItem.RecoveryPartitionDriveLetter
+                        if ($cachedRecoveryPartitionDriveLetter -ne $RecoveryPartitionDriveLetter) { WriteLog "RecoveryPartitionDriveLetter mismatch (cached: $($vhdxCacheItem.RecoveryPartitionDriveLetter), current: $RecoveryPartitionDriveLetter), continuing"; continue }
+                    }
                     if ($vhdxCacheItem.PSObject.Properties.Name -notcontains 'PartitionLayoutSignature') { WriteLog 'PartitionLayoutSignature missing in cached config, continuing'; continue }
                     if ($vhdxCacheItem.PartitionLayoutSignature -ne $partitionLayoutSignature) { WriteLog 'PartitionLayoutSignature mismatch, continuing'; continue }
 
@@ -7823,7 +7899,12 @@ try {
         $osPartitionDriveLetter = $osPartition[1].DriveLetter
         $WindowsPartition = $osPartitionDriveLetter + ':\'
 
-        $recoveryPartition = New-RecoveryPartition -VhdxDisk $vhdxDisk -OsPartition $osPartition[1] -RecoveryPartitionSize $RecoveryPartitionSize -DriveLetter $RecoveryPartitionDriveLetter -OsPartitionUsesMaximumSize ($OSPartitionSize -le 0)
+        if ($CreateRecoveryPartition) {
+            $recoveryPartition = New-RecoveryPartition -VhdxDisk $vhdxDisk -OsPartition $osPartition[1] -RecoveryPartitionSize $RecoveryPartitionSize -DriveLetter $RecoveryPartitionDriveLetter -OsPartitionUsesMaximumSize ($OSPartitionSize -le 0)
+        }
+        else {
+            WriteLog 'CreateRecoveryPartition is false. Skipping Windows Recovery partition creation.'
+        }
 
         foreach ($additionalDataPartition in $normalizedAdditionalDataPartitions) {
             New-DataPartition -VhdxDisk $vhdxDisk -DataPartition $additionalDataPartition | Out-Null
@@ -8002,6 +8083,7 @@ try {
         $cachedVHDXInfo.VhdxFileName = $("$VMName.vhdx")
         $cachedVHDXInfo.LogicalSectorSizeBytes = $LogicalSectorSizeBytes
         $cachedVHDXInfo.Disksize = $Disksize
+        $cachedVHDXInfo.CreateRecoveryPartition = $CreateRecoveryPartition
         $cachedVHDXInfo.SystemPartitionDriveLetter = [string]$SystemPartitionDriveLetter
         $cachedVHDXInfo.WindowsPartitionDriveLetter = [string]$WindowsPartitionDriveLetter
         $cachedVHDXInfo.RecoveryPartitionDriveLetter = [string]$RecoveryPartitionDriveLetter

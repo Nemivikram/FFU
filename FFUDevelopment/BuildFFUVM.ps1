@@ -3585,8 +3585,8 @@ function Get-FFUOptimizePartitionNumber {
         throw 'Unable to resolve Windows partition for FFU optimization.'
     }
 
-    WriteLog "Using Windows partition (partition number $($windowsPartition.PartitionNumber)) for FFU optimization."
-    return [int]$windowsPartition.PartitionNumber
+    WriteLog "Using DISM default Windows partition selection for FFU optimization. Resolved Windows partition number $($windowsPartition.PartitionNumber)."
+    return 0
 }
 #Add boot files
 function Add-BootFiles {

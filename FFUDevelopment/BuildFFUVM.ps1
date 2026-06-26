@@ -3353,51 +3353,103 @@ function New-RecoveryPartition {
     )
 
     WriteLog "Creating empty Recovery partition (to be filled on first boot automatically)..."
-    
+
     $calculatedRecoverySize = 0
     $recoveryPartition = $null
 
-    if ($RecoveryPartitionSize -gt 0) {
-        $calculatedRecoverySize = $RecoveryPartitionSize
-    }
-    else {
-        $winReWim = Get-ChildItem "$($OsPartition.DriveLetter):\Windows\System32\Recovery\Winre.wim" -Attributes Hidden -ErrorAction SilentlyContinue
+    try {
+        if ($RecoveryPartitionSize -gt 0) {
+            $calculatedRecoverySize = $RecoveryPartitionSize
+            WriteLog "Using configured Recovery partition size in bytes: $calculatedRecoverySize"
+        }
+        else {
+            $winReWim = Get-ChildItem "$($OsPartition.DriveLetter):\Windows\System32\Recovery\Winre.wim" -Attributes Hidden -ErrorAction SilentlyContinue
 
-        if (($null -ne $winReWim) -and ($winReWim.Count -eq 1)) {
-            # Wim size + 100MB is minimum WinRE partition size.
-            # NTFS and other partitioning size differences account for about 17MB of space that's unavailable.
-            # Adding 32MB as a buffer to ensure there's enough space to account for NTFS file system overhead.
-            # Adding 250MB as per recommendations from 
-            # https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/configure-uefigpt-based-hard-drive-partitions?view=windows-11#recovery-tools-partition
-            $calculatedRecoverySize = $winReWim.Length + 250MB + 32MB
+            if (($null -ne $winReWim) -and ($winReWim.Count -eq 1)) {
+                # Wim size + 100MB is minimum WinRE partition size.
+                # NTFS and other partitioning size differences account for about 17MB of space that's unavailable.
+                # Adding 32MB as a buffer to ensure there's enough space to account for NTFS file system overhead.
+                # Adding 250MB as per recommendations from
+                # https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/configure-uefigpt-based-hard-drive-partitions?view=windows-11#recovery-tools-partition
+                $calculatedRecoverySize = $winReWim.Length + 250MB + 32MB
 
-            WriteLog "Calculated space needed for recovery in bytes: $calculatedRecoverySize"
+                WriteLog "Calculated space needed for recovery in bytes: $calculatedRecoverySize"
+            }
+            else {
+                WriteLog "No WinRE.WIM found in the OS partition under \Windows\System32\Recovery."
+                WriteLog "Skipping creating the Recovery partition."
+                WriteLog "If a Recovery partition is desired, please re-run the script setting the -RecoveryPartitionSize flag as appropriate."
+            }
+        }
+
+        if ($calculatedRecoverySize -gt 0) {
+            $calculatedRecoverySize = [uint64]([math]::Ceiling($calculatedRecoverySize / 4096) * 4096)
+            WriteLog "Aligned Recovery partition size in bytes: $calculatedRecoverySize"
+            $recoveryPartitionReserveSize = $calculatedRecoverySize + 1MB
+            WriteLog "Recovery partition reserve size in bytes: $recoveryPartitionReserveSize"
 
             if ($null -ne $DataPartition) {
-                $DataPartition | Resize-Partition -Size ($DataPartition.Size - $calculatedRecoverySize)
-                WriteLog "Data partition shrunk by $calculatedRecoverySize bytes for Recovery partition."
+                if ($DataPartition.Size -le $recoveryPartitionReserveSize) {
+                    throw "Data partition is too small to reserve $recoveryPartitionReserveSize bytes for the Recovery partition."
+                }
+
+                $newDataPartitionSize = [math]::Floor(($DataPartition.Size - $recoveryPartitionReserveSize) / 4096) * 4096
+                $supportedDataPartitionSize = $DataPartition | Get-PartitionSupportedSize -ErrorAction Stop
+
+                if ($newDataPartitionSize -lt $supportedDataPartitionSize.SizeMin) {
+                    throw "Data partition cannot be shrunk enough to reserve $recoveryPartitionReserveSize bytes for the Recovery partition. Minimum supported data partition size is $($supportedDataPartitionSize.SizeMin) bytes."
+                }
+
+                $DataPartition | Resize-Partition -Size $newDataPartitionSize -ErrorAction Stop
+                WriteLog "Data partition shrunk by $recoveryPartitionReserveSize bytes for Recovery partition."
             }
             elseif ($OsPartitionUsesMaximumSize) {
-                $newOsPartitionSize = [math]::Floor(($OsPartition.Size - $calculatedRecoverySize) / 4096) * 4096
-                $OsPartition | Resize-Partition -Size $newOsPartitionSize
-                WriteLog "OS partition shrunk by $calculatedRecoverySize bytes for Recovery partition."
+                if ($OsPartition.Size -le $recoveryPartitionReserveSize) {
+                    throw "OS partition is too small to reserve $recoveryPartitionReserveSize bytes for the Recovery partition."
+                }
+
+                $newOsPartitionSize = [math]::Floor(($OsPartition.Size - $recoveryPartitionReserveSize) / 4096) * 4096
+                $supportedOsPartitionSize = $OsPartition | Get-PartitionSupportedSize -ErrorAction Stop
+
+                if ($newOsPartitionSize -lt $supportedOsPartitionSize.SizeMin) {
+                    throw "OS partition cannot be shrunk enough to reserve $recoveryPartitionReserveSize bytes for the Recovery partition. Minimum supported OS partition size is $($supportedOsPartitionSize.SizeMin) bytes."
+                }
+
+                $OsPartition | Resize-Partition -Size $newOsPartitionSize -ErrorAction Stop
+                WriteLog "OS partition shrunk by $recoveryPartitionReserveSize bytes for Recovery partition."
             }
             else {
                 WriteLog 'Using free space reserved after the Windows partition for Recovery partition.'
             }
-        }
-        else {
-            WriteLog "No WinRE.WIM found in the OS partition under \Windows\System32\Recovery."
-            WriteLog "Skipping creating the Recovery partition."
-            WriteLog "If a Recovery partition is desired, please re-run the script setting the -RecoveryPartitionSize flag as appropriate."
+
+            $currentVhdxDisk = Get-Disk -Number $VhdxDisk.Number -ErrorAction Stop
+            $largestFreeExtent = [uint64]$currentVhdxDisk.LargestFreeExtent
+            WriteLog "Largest free extent available for Recovery partition in bytes: $largestFreeExtent"
+
+            if ($largestFreeExtent -lt $calculatedRecoverySize) {
+                throw "Not enough available capacity for Recovery partition. Required: $calculatedRecoverySize bytes. Largest free extent: $largestFreeExtent bytes."
+            }
+
+            $partition = $currentVhdxDisk | New-Partition -DriveLetter $DriveLetter -Size $calculatedRecoverySize -GptType "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}" -ErrorAction Stop
+
+            if ([string]::IsNullOrWhiteSpace([string]$partition.DriveLetter)) {
+                Set-Partition -DiskNumber $partition.DiskNumber -PartitionNumber $partition.PartitionNumber -NewDriveLetter $DriveLetter -ErrorAction Stop
+                $partition = Get-Partition -DiskNumber $partition.DiskNumber -PartitionNumber $partition.PartitionNumber -ErrorAction Stop
+            }
+
+            if (([string]$partition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant() -ne $DriveLetter.Trim().TrimEnd(':').ToUpperInvariant()) {
+                throw "Recovery partition was created, but drive letter $DriveLetter`: was not assigned."
+            }
+
+            $partition | Format-Volume -FileSystem NTFS -Confirm:$false -Force -NewFileSystemLabel 'Recovery' -ErrorAction Stop | Out-Null
+            $recoveryPartition = Get-Partition -DiskNumber $partition.DiskNumber -PartitionNumber $partition.PartitionNumber -ErrorAction Stop
+
+            WriteLog "Done. Recovery partition at drive $($recoveryPartition.DriveLetter):"
         }
     }
-
-    if ($calculatedRecoverySize -gt 0) {
-        $recoveryPartition = $VhdxDisk | New-Partition -DriveLetter $DriveLetter -Size $calculatedRecoverySize -GptType "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}" `
-        | Format-Volume -FileSystem NTFS -Confirm:$false -Force -NewFileSystemLabel 'Recovery'
-
-        WriteLog "Done. Recovery partition at drive $($recoveryPartition.DriveLetter):"
+    catch {
+        WriteLog "Failed to create Recovery partition. $($_.Exception.Message)"
+        throw
     }
 
     return $recoveryPartition

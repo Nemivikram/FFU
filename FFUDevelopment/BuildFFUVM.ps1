@@ -4789,15 +4789,15 @@ Function New-DeploymentUSB {
 
         # Copy other files
         if ($using:CopyFFU.IsPresent -and $null -ne $using:SelectedFFUFile) {
-            if ($using:SelectedFFUFile -is [array]) {
+            $selectedFFUFiles = @($using:SelectedFFUFile)
+            if ($selectedFFUFiles.Count -gt 1) {
                 WriteLog "Copying multiple FFU files to $DeployPartitionDriveLetter"
-                foreach ($FFUFile in $using:SelectedFFUFile) {
-                    robocopy (Split-Path $FFUFile -Parent) $DeployPartitionDriveLetter (Split-Path $FFUFile -Leaf) /J /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
-                }
             }
-            else {
-                WriteLog "Copying $($using:SelectedFFUFile) to $DeployPartitionDriveLetter"
-                robocopy (Split-Path $using:SelectedFFUFile -Parent) $DeployPartitionDriveLetter (Split-Path $using:SelectedFFUFile -Leaf) /J /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+            elseif ($selectedFFUFiles.Count -eq 1) {
+                WriteLog "Copying $(Split-Path $selectedFFUFiles[0] -Leaf) to $DeployPartitionDriveLetter"
+            }
+            foreach ($ffuFile in $selectedFFUFiles) {
+                robocopy (Split-Path $ffuFile -Parent) $DeployPartitionDriveLetter (Split-Path $ffuFile -Leaf) /J /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
             }
         }
 

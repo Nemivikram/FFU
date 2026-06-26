@@ -445,7 +445,7 @@ function Invoke-WingetDownload {
 
         # Invoke the centralized parallel processing function
         # Pass task type and task-specific arguments
-        Invoke-ParallelProcessing -ItemsToProcess $itemsToProcess `
+        $parallelResults = Invoke-ParallelProcessing -ItemsToProcess $itemsToProcess `
             -ListViewControl $State.Controls.lstWingetResults `
             -IdentifierProperty 'Id' `
             -StatusProperty 'DownloadStatus' `

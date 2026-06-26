@@ -799,7 +799,7 @@ function Get-Apps {
     }
     
     # Invoke parallel processing in non-UI mode (no WindowObject or ListViewControl)
-    Invoke-ParallelProcessing -ItemsToProcess $itemsToProcess `
+    $parallelResults = Invoke-ParallelProcessing -ItemsToProcess $itemsToProcess `
         -IdentifierProperty 'Id' `
         -StatusProperty 'DownloadStatus' `
         -TaskType 'WingetDownload' `

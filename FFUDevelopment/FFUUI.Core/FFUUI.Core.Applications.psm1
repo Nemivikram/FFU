@@ -487,7 +487,7 @@ function Invoke-CopyBYOApps {
         
     # Invoke the centralized parallel processing function
     # Pass task type and task-specific arguments
-    Invoke-ParallelProcessing -ItemsToProcess $itemsToProcess `
+    $parallelResults = Invoke-ParallelProcessing -ItemsToProcess $itemsToProcess `
         -ListViewControl $State.Controls.lstApplications `
         -IdentifierProperty 'Name' `
         -StatusProperty 'CopyStatus' `

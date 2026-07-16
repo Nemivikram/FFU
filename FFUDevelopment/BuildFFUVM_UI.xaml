@@ -365,6 +365,7 @@
                                                     <ColumnDefinition Width="120"/>
                                                     <ColumnDefinition Width="140"/>
                                                     <ColumnDefinition Width="130"/>
+                                                    <ColumnDefinition Width="160"/>
                                                     <ColumnDefinition Width="Auto"/>
                                                 </Grid.ColumnDefinitions>
                                                 <Grid.RowDefinitions>
@@ -374,8 +375,9 @@
                                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" Margin="0,0,8,8"/>
                                                 <TextBlock Grid.Row="0" Grid.Column="1" Text="Drive Letter" Margin="0,0,8,8"/>
                                                 <TextBlock Grid.Row="0" Grid.Column="2" Text="Size (GB)" Margin="0,0,8,8"/>
-                                                <TextBlock Grid.Row="0" Grid.Column="3" Text="Fill Remaining" Margin="0,0,0,8"/>
-                                                <TextBlock Grid.Row="0" Grid.Column="4" Text=" " Margin="0,0,0,8"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="3" Text="Fill Remaining" Margin="0,0,8,8"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="4" Text="Persist Drive Letter" Margin="0,0,8,8"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="5" Text=" " Margin="0,0,0,8"/>
                                                 <TextBox x:Name="txtDataPartitionName" Grid.Row="1" Grid.Column="0" Margin="0,0,8,0" ToolTip="Name and volume label for the data partition."/>
                                                 <ComboBox x:Name="cmbDataPartitionDriveLetter" Grid.Row="1" Grid.Column="1" Margin="0,0,8,0" ToolTip="Build-time drive letter for the data partition.">
                                                     <ComboBoxItem Content="D" IsSelected="True"/>
@@ -392,16 +394,20 @@
                                                     <ComboBoxItem Content="O"/>
                                                     <ComboBoxItem Content="P"/>
                                                     <ComboBoxItem Content="Q"/>
+                                                    <ComboBoxItem Content="R"/>
+                                                    <ComboBoxItem Content="S"/>
                                                     <ComboBoxItem Content="T"/>
                                                     <ComboBoxItem Content="U"/>
                                                     <ComboBoxItem Content="V"/>
+                                                    <ComboBoxItem Content="W"/>
                                                     <ComboBoxItem Content="X"/>
                                                     <ComboBoxItem Content="Y"/>
                                                     <ComboBoxItem Content="Z"/>
                                                 </ComboBox>
                                                 <TextBox x:Name="txtDataPartitionSizeGB" Grid.Row="1" Grid.Column="2" Margin="0,0,8,0" ToolTip="Data partition size in GB. Leave blank only when Fill Remaining is selected."/>
-                                                <CheckBox x:Name="chkDataPartitionFillRemaining" Grid.Row="1" Grid.Column="3" VerticalAlignment="Center" ToolTip="Use the remaining VHDX space for this data partition. Only one data partition can fill remaining space."/>
-                                                <Button x:Name="btnAddDataPartition" Grid.Row="1" Grid.Column="4" Content="Add Data Partition" Width="160" ToolTip="Add the configured data partition to the build configuration."/>
+                                                <CheckBox x:Name="chkDataPartitionFillRemaining" Grid.Row="1" Grid.Column="3" Margin="0,0,8,0" VerticalAlignment="Center" ToolTip="Use the remaining VHDX space for this data partition. Only one data partition can fill remaining space."/>
+                                                <CheckBox x:Name="chkDataPartitionPersistDriveLetter" Grid.Row="1" Grid.Column="4" Margin="0,0,8,0" VerticalAlignment="Center" ToolTip="Keep this drive letter in the build VM and on devices deployed with FFU Builder."/>
+                                                <Button x:Name="btnAddDataPartition" Grid.Row="1" Grid.Column="5" Content="Add Data Partition" Width="160" ToolTip="Add the configured data partition to the build configuration."/>
                                             </Grid>
 
                                             <Grid Margin="0,0,0,12">

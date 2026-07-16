@@ -341,6 +341,14 @@ function Get-PartitionSizeGBDisplay {
 }
 
 function Get-PartitionDriveLetterOptions {
+    param(
+        [switch]$DataPartition
+    )
+
+    if ($DataPartition) {
+        return @('D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z')
+    }
+
     return @('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z')
 }
 
@@ -355,12 +363,15 @@ function New-DiskLayoutPartitionRow {
         [string]$SizeGB,
         [int64]$SizeBytes = 0,
         [bool]$FillRemaining,
+        [bool]$PersistDriveLetter,
         [string]$FileSystem = 'NTFS',
         [bool]$CanSelect,
         [bool]$CanEditDriveLetter,
         [bool]$CanEditSize,
         [bool]$CanEditFillRemaining,
         [string]$FillRemainingVisibility = 'Visible',
+        [bool]$CanEditPersistDriveLetter,
+        [string]$PersistDriveLetterVisibility = 'Hidden',
         [bool]$CanRemove,
         [bool]$CanReorder
     )
@@ -376,15 +387,18 @@ function New-DiskLayoutPartitionRow {
         Name                 = $Name
         Label                = $Label
         DriveLetter          = $DriveLetter
-        DriveLetterOptions   = @(Get-PartitionDriveLetterOptions)
+        DriveLetterOptions   = @(Get-PartitionDriveLetterOptions -DataPartition:($PartitionType -eq 'Data'))
         SizeGB               = $SizeGB
         SizeBytes            = $SizeBytes
         FillRemaining        = $FillRemaining
         FillRemainingVisibility = $FillRemainingVisibility
+        PersistDriveLetter   = $PersistDriveLetter
+        PersistDriveLetterVisibility = $PersistDriveLetterVisibility
         FileSystem           = $FileSystem
         CanEditDriveLetter   = $CanEditDriveLetter
         CanEditSize          = $CanEditSize
         CanEditFillRemaining = $CanEditFillRemaining
+        CanEditPersistDriveLetter = $CanEditPersistDriveLetter
         CanRemove            = $CanRemove
         CanReorder           = $CanReorder
     }
@@ -433,7 +447,11 @@ function Get-DiskLayoutPartitionRows {
     }
 
     foreach ($dataPartition in @($State.Data.additionalDataPartitionsDataList)) {
-        $rows.Add((New-DiskLayoutPartitionRow -PartitionType 'Data' -Name $dataPartition.Name -Label $dataPartition.Label -DriveLetter $dataPartition.DriveLetter -SizeGB $dataPartition.SizeGB -SizeBytes ([int64]$dataPartition.SizeBytes) -FillRemaining ([bool]$dataPartition.FillRemaining) -FileSystem $dataPartition.FileSystem -CanSelect $true -CanEditDriveLetter $true -CanEditSize $true -CanEditFillRemaining $true -CanRemove $true -CanReorder $true))
+        $persistDriveLetter = $false
+        if ($dataPartition.PSObject.Properties.Name -contains 'PersistDriveLetter') {
+            $persistDriveLetter = [bool]$dataPartition.PersistDriveLetter
+        }
+        $rows.Add((New-DiskLayoutPartitionRow -PartitionType 'Data' -Name $dataPartition.Name -Label $dataPartition.Label -DriveLetter $dataPartition.DriveLetter -SizeGB $dataPartition.SizeGB -SizeBytes ([int64]$dataPartition.SizeBytes) -FillRemaining ([bool]$dataPartition.FillRemaining) -PersistDriveLetter $persistDriveLetter -FileSystem $dataPartition.FileSystem -CanSelect $true -CanEditDriveLetter $true -CanEditSize $true -CanEditFillRemaining $true -CanEditPersistDriveLetter $true -PersistDriveLetterVisibility 'Visible' -CanRemove $true -CanReorder $true))
     }
 
     return $rows.ToArray()
@@ -493,6 +511,7 @@ function Sync-DiskLayoutRowsToControls {
                         SizeGB        = $row.SizeGB
                         SizeBytes     = [int64]$row.SizeBytes
                         FillRemaining = [bool]$row.FillRemaining
+                        PersistDriveLetter = [bool]$row.PersistDriveLetter
                         FileSystem    = $row.FileSystem
                     })
             }
@@ -805,8 +824,10 @@ function Test-DiskLayoutConfiguration {
         if ($partitionRow.PartitionType -eq 'Recovery' -and -not [bool]$Config.CreateRecoveryPartition) { continue }
 
         $driveLetter = ([string]$partitionRow.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
-        if ([string]::IsNullOrWhiteSpace($driveLetter) -or $driveLetter -notmatch '^[A-Z]$') {
-            $errors.Add("$($partitionRow.Name) must use a single drive letter from A to Z.")
+        $validDriveLetterPattern = if ($partitionRow.PartitionType -eq 'Data') { '^[D-Z]$' } else { '^[A-Z]$' }
+        $validDriveLetterRange = if ($partitionRow.PartitionType -eq 'Data') { 'D to Z' } else { 'A to Z' }
+        if ([string]::IsNullOrWhiteSpace($driveLetter) -or $driveLetter -notmatch $validDriveLetterPattern) {
+            $errors.Add("$($partitionRow.Name) must use a single drive letter from $validDriveLetterRange.")
             continue
         }
 
@@ -883,6 +904,7 @@ function Clear-AdditionalDataPartitionForm {
     $State.Controls.txtDataPartitionName.Clear()
     $State.Controls.txtDataPartitionSizeGB.Clear()
     $State.Controls.chkDataPartitionFillRemaining.IsChecked = $false
+    $State.Controls.chkDataPartitionPersistDriveLetter.IsChecked = $false
     $State.Controls.txtDataPartitionSizeGB.IsEnabled = $true
 }
 
@@ -915,8 +937,8 @@ function Add-AdditionalDataPartition {
     }
 
     $driveLetter = ([string](Get-ComboBoxSelectedContent -ComboBox $State.Controls.cmbDataPartitionDriveLetter)).Trim().TrimEnd(':').ToUpperInvariant()
-    if ([string]::IsNullOrWhiteSpace($driveLetter) -or $driveLetter -notmatch '^[A-Z]$') {
-        [System.Windows.MessageBox]::Show("Select a drive letter for the data partition.", "Data Partition Drive Letter", "OK", "Warning") | Out-Null
+    if ([string]::IsNullOrWhiteSpace($driveLetter) -or $driveLetter -notmatch '^[D-Z]$') {
+        [System.Windows.MessageBox]::Show("Select a drive letter from D through Z for the data partition.", "Data Partition Drive Letter", "OK", "Warning") | Out-Null
         return $false
     }
 
@@ -944,6 +966,7 @@ function Add-AdditionalDataPartition {
     }
 
     $fillRemaining = $true -eq $State.Controls.chkDataPartitionFillRemaining.IsChecked
+    $persistDriveLetter = $true -eq $State.Controls.chkDataPartitionPersistDriveLetter.IsChecked
     if ($fillRemaining -and ($State.Data.additionalDataPartitionsDataList | Where-Object { $_.FillRemaining } | Select-Object -First 1)) {
         [System.Windows.MessageBox]::Show("Only one data partition can fill the remaining VHDX space.", "Fill Remaining Already Used", "OK", "Warning") | Out-Null
         return $false
@@ -975,11 +998,12 @@ function Add-AdditionalDataPartition {
         SizeGB        = $sizeGbDisplay
         SizeBytes     = $sizeBytes
         FillRemaining = $fillRemaining
+        PersistDriveLetter = $persistDriveLetter
         FileSystem    = 'NTFS'
     }
 
     $State.Data.additionalDataPartitionsDataList.Add($newItem)
-    WriteLog "Added additional data partition '$partitionName' (DriveLetter=$driveLetter, SizeBytes=$sizeBytes, FillRemaining=$fillRemaining)."
+    WriteLog "Added additional data partition '$partitionName' (DriveLetter=$driveLetter, SizeBytes=$sizeBytes, FillRemaining=$fillRemaining, PersistDriveLetter=$persistDriveLetter)."
     Update-AdditionalDataPartitionsListView -State $State
     Clear-AdditionalDataPartitionForm -State $State
     return $true
@@ -993,7 +1017,8 @@ function Add-PendingAdditionalDataPartition {
 
     $hasPendingDataPartitionInput = -not [string]::IsNullOrWhiteSpace([string]$State.Controls.txtDataPartitionName.Text) -or
         -not [string]::IsNullOrWhiteSpace([string]$State.Controls.txtDataPartitionSizeGB.Text) -or
-        ($true -eq $State.Controls.chkDataPartitionFillRemaining.IsChecked)
+        ($true -eq $State.Controls.chkDataPartitionFillRemaining.IsChecked) -or
+        ($true -eq $State.Controls.chkDataPartitionPersistDriveLetter.IsChecked)
 
     if (-not $hasPendingDataPartitionInput) {
         return $true
@@ -1049,6 +1074,7 @@ function Get-AdditionalDataPartitionConfigRows {
                 DriveLetter   = $_.DriveLetter
                 SizeBytes     = [int64]$_.SizeBytes
                 FillRemaining = [bool]$_.FillRemaining
+                PersistDriveLetter = [bool]$_.PersistDriveLetter
                 FileSystem    = $_.FileSystem
             }
         })
@@ -1105,6 +1131,16 @@ function Import-AdditionalDataPartitionsFromConfig {
             try { $fillRemaining = [System.Convert]::ToBoolean($partition.FillRemaining) } catch { $fillRemaining = $false }
         }
 
+        $persistDriveLetter = $false
+        if ($partition.PSObject.Properties.Name -contains 'PersistDriveLetter') {
+            try {
+                $persistDriveLetter = [System.Convert]::ToBoolean($partition.PersistDriveLetter)
+            }
+            catch {
+                throw "Data partition '$partitionName' PersistDriveLetter must be true or false."
+            }
+        }
+
         [int64]$sizeBytes = 0
         if ($partition.PSObject.Properties.Name -contains 'SizeBytes') {
             [int64]::TryParse([string]$partition.SizeBytes, [ref]$sizeBytes) | Out-Null
@@ -1120,6 +1156,7 @@ function Import-AdditionalDataPartitionsFromConfig {
                 SizeGB        = Get-PartitionSizeGBDisplay -SizeBytes $sizeBytes
                 SizeBytes     = $sizeBytes
                 FillRemaining = $fillRemaining
+                PersistDriveLetter = $persistDriveLetter
                 FileSystem    = $fileSystem
             })
     }

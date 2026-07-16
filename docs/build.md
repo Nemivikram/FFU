@@ -250,6 +250,11 @@ A cached VHDX is reused only when the cache metadata matches your current build 
 - Logical sector size (512 vs 4096)
 - Optional features selection
 - The exact set of update payload file names downloaded for that run (SSU/CU/.NET/etc.)
+- Disk size, Recovery layout, and the ordered data-partition name, label, file system, size, and **Fill Remaining** settings
+
+System, Windows, Recovery, and data drive letters do not affect cache matching. The per-data-partition **Persist Drive Letter** setting also does not affect matching. On a cache hit, FFU Builder copies the cached base and applies the current host build letters only to that working copy.
+
+Cache metadata from the earlier drive-letter-aware schema is skipped rather than migrated or deleted. The first build after this change may create one replacement cache. Remove older VHDX and config pairs manually after confirming the replacement is usable.
 
 #### Disk Usage and Cleanup
 
@@ -260,6 +265,20 @@ VHDX caching trades disk space for speed. The `VHDXCache` folder can grow over t
 > Note
 >
 > To force a full rebuild, delete the contents of `$FFUDevelopmentPath\VHDXCache` (or disable **Allow VHDX Caching**) and run the build again.
+
+### Persisted Data Drive Letters
+
+Data partitions can opt in to **Persist Drive Letter** in **Disk Layout**. The option is off by default, and data letters are limited to `D:` through `Z:`.
+
+For builds that install applications in a VM, FFU Builder applies and verifies opted-in letters in audit mode before it searches for the Apps ISO or runs application scripts. The host requires an audit success marker before it captures the VHDX. For builds without a VM, the same deployment files are added directly to the working VHDX before capture.
+
+On a deployed device, FFU Builder inserts the assignment command first in `Microsoft-Windows-Deployment\RunSynchronous` for the Windows `specialize` pass. Microsoft documents that these commands run in order and in system context during `specialize`; see [RunSynchronous](https://learn.microsoft.com/windows-hardware/customize/desktop/unattend/microsoft-windows-deployment-runsynchronous). The command uses `WillReboot=OnRequest`, returns `0` only after assignment and cleanup succeed, and returns `3` on failure. Microsoft documents that with `OnRequest`, return codes other than `0`, `1`, or `2` terminate installation; see [WillReboot](https://learn.microsoft.com/windows-hardware/customize/desktop/unattend/microsoft-windows-deployment-runsynchronous-runsynchronouscommand-willreboot).
+
+An optimized FFU can resize the Windows partition or the partition selected by `-OptimizeFFUPartitionNumber` when it is applied to a differently sized drive. If an opted-in data partition is the selected resize target, drive-letter enforcement accepts its deployed size while still requiring its GPT identity, partition number, volume label, and file system to match the captured partition. Other data partitions must retain their captured sizes. See [Optimize an FFU](https://learn.microsoft.com/windows-hardware/manufacture/desktop/deploy-windows-using-full-flash-update--ffu?view=windows-11#optimize-an-ffu).
+
+All requested-letter conflicts are fatal. FFU Builder does not move an Apps ISO, deployment USB, existing fixed volume, or another partition, and it does not select a substitute letter. A successful deployed run removes the dedicated runtime directory, script, manifest, and markers. It leaves only `C:\Windows\Temp\FFUDataPartitionDriveLetters.log`. A failed run retains the runtime inputs and failure marker for diagnosis.
+
+When FFU Builder deployment media applies the image, `ApplyFFU.ps1` treats PE letters as temporary. If a custom deployment unattend is copied from USB, the script merges the persistence command into that final Panther answer file and preserves its other settings. Without a custom unattend, it verifies that the command embedded in the FFU is still present. Builds with no opted-in data partitions add no persistence directory, manifest, markers, or unattend command.
 
 ### Create Deployment Media
 

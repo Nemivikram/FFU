@@ -5,6 +5,21 @@ Start-Transcript -Path $logPath -Append -Force | Out-Null
 
 try {
     Write-Host 'Starting FFU orchestration bootstrap.'
+    $driveLetterRuntimeDirectory = 'C:\Windows\Setup\Scripts\FFUDL'
+    $driveLetterScriptPath = Join-Path -Path $driveLetterRuntimeDirectory -ChildPath 'Apply.ps1'
+    $driveLetterManifestPath = Join-Path -Path $driveLetterRuntimeDirectory -ChildPath 'Manifest.json'
+    if (Test-Path -LiteralPath $driveLetterScriptPath -PathType Leaf) {
+        Write-Host 'Applying configured data partition drive letters before locating Apps media.'
+        & 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -NoProfile -ExecutionPolicy Bypass -File $driveLetterScriptPath -ManifestPath $driveLetterManifestPath -Phase Audit
+        $driveLetterExitCode = $LASTEXITCODE
+        if ($driveLetterExitCode -ne 0) {
+            Write-Error "Data partition drive-letter enforcement failed with exit code $driveLetterExitCode. Shutting down the build VM."
+            Stop-Computer -Force
+            throw "Data partition drive-letter enforcement failed with exit code $driveLetterExitCode."
+        }
+        Write-Host 'Configured data partition drive letters are ready.'
+    }
+
     $deadline = (Get-Date).AddMinutes(10)
     $orchestratorPath = $null
 

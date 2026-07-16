@@ -19,7 +19,7 @@ This table lists all top-level parameters in BuildFFUVM.ps1.
 | Parameter | Type | UI Control | Description |
 | --- | --- | --- | --- |
 | -AdditionalFFUFiles | string[] | Copy Additional FFU Files + Additional FFU Files list | Array of full file paths to existing FFU files that should also be copied to the deployment USB when -CopyAdditionalFFUFiles is set to $true. |
-| -AdditionalDataPartitions | object[] | Disk Layout | Creates optional data partitions after the base Windows layout. Recovery normally remains before data partitions unless -CreateRecoveryPartition is $false. Each item supports Name, Label, DriveLetter, SizeBytes or SizeGB, FillRemaining, and FileSystem. Only one item can use FillRemaining. |
+| -AdditionalDataPartitions | object[] | Disk Layout | Creates optional data partitions after the base Windows layout. Recovery normally remains before data partitions unless -CreateRecoveryPartition is $false. Each item supports Name, Label, DriveLetter, SizeBytes or SizeGB, FillRemaining, FileSystem, and PersistDriveLetter. DriveLetter must be D through Z, only one item can use FillRemaining, and PersistDriveLetter defaults to $false. |
 | -AllowExternalHardDiskMedia | bool | Allow External Hard Disk Media | When set to $true, will allow the use of media identified as External Hard Disk media via WMI class Win32_DiskDrive. Default is not defined. |
 | -AllowVHDXCaching | bool | Allow VHDX Caching | When set to $true, will cache the VHDX file to the $FFUDevelopmentPath\VHDXCache folder and create a config json file that will keep track of the Windows build information, the updates installed, and the logical sector byte size information. Default is $false. |
 | -AppListPath | string | AppList.json Path | Path to a JSON file containing a list of applications to install using WinGet. Default is $FFUDevelopmentPath\Apps\AppList.json. |
@@ -111,5 +111,21 @@ This table lists all top-level parameters in BuildFFUVM.ps1.
 | -WindowsSKU | string | Windows SKU | Edition/SKU to install. Accepted values are: 'Home', 'Home N', 'Home Single Language', 'Education', 'Education N', 'Pro', 'Pro N', 'Pro Education', 'Pro Education N', 'Pro for Workstations', 'Pro N for Workstations', 'Enterprise', 'Enterprise N', 'Enterprise 2016 LTSB', 'Enterprise N 2016 LTSB', 'Enterprise LTSC', 'Enterprise N LTSC', 'IoT Enterprise LTSC', 'IoT Enterprise N LTSC', 'Standard', 'Standard (Desktop Experience)', 'Datacenter', 'Datacenter (Desktop Experience)'. |
 | -WindowsVersion | string | Windows Version | String value of the Windows version to download. This is used to identify which version of Windows to download. Default is '25h2'. |
 {: .parameters-reference-table }
+
+## AdditionalDataPartitions Items
+
+Each item supports the following fields:
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `Name` | Yes | Partition name used in configuration and logs. |
+| `Label` | No | Volume label. Defaults to `Name`. |
+| `DriveLetter` | Yes | Build letter from `D` through `Z`, without a colon. It must be unique across the complete build layout. |
+| `SizeBytes` or `SizeGB` | Conditional | Fixed partition size. Omit only when `FillRemaining` is `$true`. |
+| `FillRemaining` | No | Uses the remaining VHDX space. Default is `$false`; only one data partition can enable it. |
+| `FileSystem` | No | `NTFS` or `ReFS`. Default is `NTFS`. |
+| `PersistDriveLetter` | No | When `$true`, requires the selected data letter in the build VM and deployed Windows. Default is `$false`. Any occupied-letter conflict stops the build or deployment. |
+
+`PersistDriveLetter` does not change VHDX cache compatibility. It controls per-build runtime artifacts that are added only to the working VHDX after the reusable base has been cached or copied.
 
 {% include page_nav.html %}

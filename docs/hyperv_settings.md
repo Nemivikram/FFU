@@ -47,7 +47,7 @@ Configures the VHDX size and the build-time partition layout used for the captur
 
 The partition list shows the build order: System, MSR, Windows, Recovery, and optional data partitions. System, Windows, and Recovery have editable build-time drive letters. Defaults are `S`, `W`, and `R`. The MSR row is display-only, fixed at 16MB, and does not use a drive letter.
 
-These drive letters only affect FFU creation. The deployment script discovers the Windows and Recovery partitions from the applied disk instead of relying on fixed partition numbers.
+The System, Windows, and Recovery selections are host-side build letters only. Installed Windows uses `C:` for its Windows partition, while System and Recovery normally have no letter. The deployment script discovers these partitions from the applied disk instead of relying on the build letters.
 
 Leave the Windows size blank to let Windows fill the remaining disk. Set a fixed Windows size before adding data partitions so the VHDX has space left for Recovery and data volumes.
 
@@ -55,7 +55,11 @@ Use the Recovery size only when you need a fixed Recovery partition size. Leave 
 
 The Recovery partition can be removed by selecting its row checkbox and using **Remove Selected**. Use **Restore Recovery** to add it back before saving or building. Removing Recovery saves `CreateRecoveryPartition` as `false` in the generated config.
 
-Each data partition has a name, build-time drive letter, and either a size in GB or **Fill Remaining**. Only one data partition can use **Fill Remaining**. Data partitions can be reordered with the arrow buttons. **Clear** removes only data partitions, not the base partition rows.
+Each data partition has a name, a drive letter from `D:` through `Z:`, and either a size in GB or **Fill Remaining**. Only one data partition can use **Fill Remaining**. Data partitions can be reordered with the arrow buttons. **Clear** removes only data partitions, not the base partition rows.
+
+**Persist Drive Letter** is off by default. When selected for a data partition, FFU Builder requires that partition to use its configured letter before build-VM application scripts run and when a deployed device enters the Windows `specialize` pass. If another volume already owns the requested letter, the build or deployment stops instead of moving that volume or selecting another letter.
+
+Windows PE drive letters are temporary and can change when hardware is detected, so assigning a letter only in PE does not provide the installed-Windows guarantee. See [WinPE: Identify drive letters with a script](https://learn.microsoft.com/windows-hardware/manufacture/desktop/winpe-identify-drive-letters?view=windows-11). Successful first-boot enforcement removes its temporary script and manifest and leaves the diagnostic log at `C:\Windows\Temp\FFUDataPartitionDriveLetters.log`.
 
 The Apps ISO drive letter is discovered at runtime. If you create a data partition that uses `D:`, application installs should use `%FFUAppsRoot%` for Apps ISO paths. Legacy `D:\` paths in `UserAppList.json` are still supported when they point to files on the Apps ISO.
 

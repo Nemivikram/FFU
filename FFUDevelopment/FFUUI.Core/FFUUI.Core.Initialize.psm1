@@ -266,6 +266,7 @@ function Initialize-UIControls {
     $State.Controls.cmbDataPartitionDriveLetter = $window.FindName('cmbDataPartitionDriveLetter')
     $State.Controls.txtDataPartitionSizeGB = $window.FindName('txtDataPartitionSizeGB')
     $State.Controls.chkDataPartitionFillRemaining = $window.FindName('chkDataPartitionFillRemaining')
+    $State.Controls.chkDataPartitionPersistDriveLetter = $window.FindName('chkDataPartitionPersistDriveLetter')
     $State.Controls.btnAddDataPartition = $window.FindName('btnAddDataPartition')
     $State.Controls.btnRemoveSelectedDataPartitions = $window.FindName('btnRemoveSelectedDataPartitions')
     $State.Controls.btnClearDataPartitions = $window.FindName('btnClearDataPartitions')
@@ -894,6 +895,27 @@ function Initialize-DynamicUIElements {
     $fillRemainingTemplate.VisualTree = $fillRemainingGridFactory
     $fillRemainingColumn.CellTemplate = $fillRemainingTemplate
     $diskLayoutGridView.Columns.Add($fillRemainingColumn)
+
+    $persistDriveLetterColumn = New-Object System.Windows.Controls.GridViewColumn
+    $persistDriveLetterColumn.Header = "Persist Drive Letter"
+    $persistDriveLetterColumn.Width = 160
+    $persistDriveLetterTemplate = New-Object System.Windows.DataTemplate
+    $persistDriveLetterGridFactory = New-Object System.Windows.FrameworkElementFactory([System.Windows.Controls.Grid])
+    $persistDriveLetterGridFactory.SetValue([System.Windows.FrameworkElement]::HorizontalAlignmentProperty, [System.Windows.HorizontalAlignment]::Stretch)
+    $persistDriveLetterFactory = New-Object System.Windows.FrameworkElementFactory([System.Windows.Controls.CheckBox])
+    $persistDriveLetterFactory.SetValue([System.Windows.Controls.Control]::ToolTipProperty, 'Keep this drive letter in the build VM and on devices deployed with FFU Builder.')
+    $persistDriveLetterFactory.SetValue([System.Windows.FrameworkElement]::HorizontalAlignmentProperty, [System.Windows.HorizontalAlignment]::Center)
+    $persistDriveLetterFactory.SetValue([System.Windows.FrameworkElement]::VerticalAlignmentProperty, [System.Windows.VerticalAlignment]::Center)
+    $persistDriveLetterBinding = New-Object System.Windows.Data.Binding("PersistDriveLetter")
+    $persistDriveLetterBinding.Mode = [System.Windows.Data.BindingMode]::TwoWay
+    $persistDriveLetterBinding.UpdateSourceTrigger = [System.Windows.Data.UpdateSourceTrigger]::PropertyChanged
+    $persistDriveLetterFactory.SetBinding([System.Windows.Controls.Primitives.ToggleButton]::IsCheckedProperty, $persistDriveLetterBinding)
+    $persistDriveLetterFactory.SetBinding([System.Windows.Controls.Control]::IsEnabledProperty, (New-Object System.Windows.Data.Binding("CanEditPersistDriveLetter")))
+    $persistDriveLetterFactory.SetBinding([System.Windows.UIElement]::VisibilityProperty, (New-Object System.Windows.Data.Binding("PersistDriveLetterVisibility")))
+    $persistDriveLetterGridFactory.AppendChild($persistDriveLetterFactory)
+    $persistDriveLetterTemplate.VisualTree = $persistDriveLetterGridFactory
+    $persistDriveLetterColumn.CellTemplate = $persistDriveLetterTemplate
+    $diskLayoutGridView.Columns.Add($persistDriveLetterColumn)
 
     Update-AdditionalDataPartitionsListView -State $State
 

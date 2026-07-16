@@ -132,6 +132,235 @@ function Get-UnattendComputerNameValue {
     return $null
 }
 
+function Get-FFUDataPartitionDriveLetterDeploymentContext {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$WindowsPartitionRoot
+    )
+
+    $runtimeDirectory = Join-Path -Path $WindowsPartitionRoot -ChildPath 'Windows\Setup\Scripts\FFUDL'
+    $runtimeScriptPath = Join-Path -Path $runtimeDirectory -ChildPath 'Apply.ps1'
+    $manifestPath = Join-Path -Path $runtimeDirectory -ChildPath 'Manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        if (Test-Path -LiteralPath $runtimeDirectory -PathType Container) {
+            throw "Data partition drive-letter runtime directory exists without a manifest at $manifestPath."
+        }
+        return $null
+    }
+
+    if (-not (Test-Path -LiteralPath $runtimeScriptPath -PathType Leaf)) {
+        throw "Data partition drive-letter manifest exists without its runtime script at $runtimeScriptPath."
+    }
+
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    if ([int]$manifest.SchemaVersion -ne 1) {
+        throw "Unsupported data partition drive-letter manifest schema version '$($manifest.SchemaVersion)'."
+    }
+    if (@($manifest.Partitions).Count -eq 0) {
+        throw 'Data partition drive-letter manifest does not contain any partitions.'
+    }
+
+    $processorArchitecture = ([string]$manifest.ProcessorArchitecture).Trim().ToLowerInvariant()
+    if ($processorArchitecture -notin @('amd64', 'arm64')) {
+        throw "Unsupported data partition drive-letter processor architecture '$processorArchitecture'."
+    }
+
+    WriteLog "Found data partition drive-letter persistence manifest with $(@($manifest.Partitions).Count) partition(s)."
+    return [pscustomobject]@{
+        RuntimeDirectory      = $runtimeDirectory
+        RuntimeScriptPath     = $runtimeScriptPath
+        ManifestPath          = $manifestPath
+        ProcessorArchitecture = $processorArchitecture
+    }
+}
+
+function Add-FFUDataPartitionDriveLetterCommandToAppliedUnattend {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$UnattendPath,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('amd64', 'arm64')]
+        [string]$ProcessorArchitecture
+    )
+
+    $unattendNamespace = 'urn:schemas-microsoft-com:unattend'
+    $wcmNamespace = 'http://schemas.microsoft.com/WMIConfig/2002/State'
+    $unattendXml = New-Object System.Xml.XmlDocument
+    $unattendXml.PreserveWhitespace = $true
+    if (-not (Test-Path -LiteralPath $UnattendPath -PathType Leaf)) {
+        throw "Deployment unattend was not found at the expected path $UnattendPath."
+    }
+    $unattendXml.Load($UnattendPath)
+
+    $unattendRoot = $unattendXml.DocumentElement
+    if ($null -eq $unattendRoot -or $unattendRoot.LocalName -ne 'unattend' -or $unattendRoot.NamespaceURI -ne $unattendNamespace) {
+        throw "Unattend XML at $UnattendPath does not use the supported unattend root namespace."
+    }
+
+    $namespaceManager = New-Object System.Xml.XmlNamespaceManager($unattendXml.NameTable)
+    $namespaceManager.AddNamespace('un', $unattendNamespace)
+    $specializeSettings = $unattendRoot.SelectSingleNode("un:settings[@pass='specialize']", $namespaceManager)
+    if ($null -eq $specializeSettings) {
+        $specializeSettings = $unattendXml.CreateElement('settings', $unattendNamespace)
+        $null = $specializeSettings.SetAttribute('pass', 'specialize')
+        $firstSettingsNode = $unattendRoot.SelectSingleNode('un:settings', $namespaceManager)
+        if ($null -ne $firstSettingsNode) {
+            $null = $unattendRoot.InsertBefore($specializeSettings, $firstSettingsNode)
+        }
+        else {
+            $null = $unattendRoot.AppendChild($specializeSettings)
+        }
+    }
+
+    $deploymentComponents = @($specializeSettings.SelectNodes("un:component[@name='Microsoft-Windows-Deployment']", $namespaceManager) |
+        Where-Object { $_.GetAttribute('processorArchitecture') -ieq $ProcessorArchitecture })
+    if ($deploymentComponents.Count -gt 1) {
+        throw "Unattend XML at $UnattendPath contains multiple Microsoft-Windows-Deployment components for $ProcessorArchitecture."
+    }
+    if ($deploymentComponents.Count -eq 0) {
+        $deploymentComponent = $unattendXml.CreateElement('component', $unattendNamespace)
+        $null = $deploymentComponent.SetAttribute('name', 'Microsoft-Windows-Deployment')
+        $null = $deploymentComponent.SetAttribute('processorArchitecture', $ProcessorArchitecture)
+        $null = $deploymentComponent.SetAttribute('publicKeyToken', '31bf3856ad364e35')
+        $null = $deploymentComponent.SetAttribute('language', 'neutral')
+        $null = $deploymentComponent.SetAttribute('versionScope', 'nonSxS')
+        $null = $specializeSettings.AppendChild($deploymentComponent)
+    }
+    else {
+        $deploymentComponent = $deploymentComponents[0]
+    }
+
+    $runSynchronous = $deploymentComponent.SelectSingleNode('un:RunSynchronous', $namespaceManager)
+    if ($null -eq $runSynchronous) {
+        $runSynchronous = $unattendXml.CreateElement('RunSynchronous', $unattendNamespace)
+        $null = $deploymentComponent.AppendChild($runSynchronous)
+    }
+
+    $existingCommands = @($runSynchronous.SelectNodes('un:RunSynchronousCommand', $namespaceManager))
+    $orderedExistingCommands = [System.Collections.Generic.List[pscustomobject]]::new()
+    $commandIndex = 0
+    foreach ($existingCommand in $existingCommands) {
+        $pathNode = $existingCommand.SelectSingleNode('un:Path', $namespaceManager)
+        if ($null -ne $pathNode -and $pathNode.InnerText -match '(?i)\\FFUDL\\Apply\.ps1') {
+            $null = $runSynchronous.RemoveChild($existingCommand)
+            continue
+        }
+
+        $orderValue = [int]::MaxValue
+        $orderNode = $existingCommand.SelectSingleNode('un:Order', $namespaceManager)
+        if ($null -ne $orderNode) {
+            $parsedOrder = 0
+            if ([int]::TryParse($orderNode.InnerText, [ref]$parsedOrder)) {
+                $orderValue = $parsedOrder
+            }
+        }
+        $orderedExistingCommands.Add([pscustomobject]@{ Node = $existingCommand; Order = $orderValue; Index = $commandIndex })
+        $commandIndex++
+    }
+
+    $nextOrder = 2
+    foreach ($existingCommandInfo in @($orderedExistingCommands | Sort-Object -Property Order, Index)) {
+        $orderNode = $existingCommandInfo.Node.SelectSingleNode('un:Order', $namespaceManager)
+        if ($null -eq $orderNode) {
+            $orderNode = $unattendXml.CreateElement('Order', $unattendNamespace)
+            $null = $existingCommandInfo.Node.PrependChild($orderNode)
+        }
+        $orderNode.InnerText = [string]$nextOrder
+        $nextOrder++
+    }
+
+    $newCommand = $unattendXml.CreateElement('RunSynchronousCommand', $unattendNamespace)
+    $actionAttribute = $unattendXml.CreateAttribute('wcm', 'action', $wcmNamespace)
+    $actionAttribute.Value = 'add'
+    $null = $newCommand.Attributes.Append($actionAttribute)
+    $orderElement = $unattendXml.CreateElement('Order', $unattendNamespace)
+    $orderElement.InnerText = '1'
+    $null = $newCommand.AppendChild($orderElement)
+    $descriptionElement = $unattendXml.CreateElement('Description', $unattendNamespace)
+    $descriptionElement.InnerText = 'Apply FFU data partition drive letters'
+    $null = $newCommand.AppendChild($descriptionElement)
+    $pathElement = $unattendXml.CreateElement('Path', $unattendNamespace)
+    $specializeCommand = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Windows\Setup\Scripts\FFUDL\Apply.ps1" -ManifestPath "C:\Windows\Setup\Scripts\FFUDL\Manifest.json" -Phase Specialize'
+    if ($specializeCommand.Length -gt 259) {
+        throw "Data partition drive-letter specialize command exceeds the 259-character unattend Path limit. Length: $($specializeCommand.Length)."
+    }
+    $pathElement.InnerText = $specializeCommand
+    $null = $newCommand.AppendChild($pathElement)
+    $willRebootElement = $unattendXml.CreateElement('WillReboot', $unattendNamespace)
+    $willRebootElement.InnerText = 'OnRequest'
+    $null = $newCommand.AppendChild($willRebootElement)
+    if ($null -ne $runSynchronous.FirstChild) {
+        $null = $runSynchronous.InsertBefore($newCommand, $runSynchronous.FirstChild)
+    }
+    else {
+        $null = $runSynchronous.AppendChild($newCommand)
+    }
+
+    $unattendXml.Save($UnattendPath)
+    WriteLog "Merged data partition drive-letter specialize command into $UnattendPath."
+}
+
+function Test-FFUDataPartitionDriveLetterCommandInAppliedUnattend {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$UnattendPath,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('amd64', 'arm64')]
+        [string]$ProcessorArchitecture
+    )
+
+    if (-not (Test-Path -LiteralPath $UnattendPath -PathType Leaf)) {
+        throw "Data partition drive-letter deployment unattend was not found at $UnattendPath."
+    }
+
+    $unattendNamespace = 'urn:schemas-microsoft-com:unattend'
+    $wcmNamespace = 'http://schemas.microsoft.com/WMIConfig/2002/State'
+    $unattendXml = New-Object System.Xml.XmlDocument
+    $unattendXml.Load($UnattendPath)
+    if ($null -eq $unattendXml.DocumentElement -or $unattendXml.DocumentElement.NamespaceURI -ne $unattendNamespace) {
+        throw "Unattend XML at $UnattendPath does not use the supported unattend root namespace."
+    }
+
+    $namespaceManager = New-Object System.Xml.XmlNamespaceManager($unattendXml.NameTable)
+    $namespaceManager.AddNamespace('un', $unattendNamespace)
+    $deploymentComponents = @($unattendXml.SelectNodes("//un:settings[@pass='specialize']/un:component[@name='Microsoft-Windows-Deployment']", $namespaceManager) |
+        Where-Object { $_.GetAttribute('processorArchitecture') -ieq $ProcessorArchitecture })
+    if ($deploymentComponents.Count -ne 1) {
+        throw "Expected exactly one specialize Microsoft-Windows-Deployment component for $ProcessorArchitecture in $UnattendPath."
+    }
+
+    $commands = @($deploymentComponents[0].SelectNodes('un:RunSynchronous/un:RunSynchronousCommand', $namespaceManager))
+    $driveLetterCommands = @($commands | Where-Object {
+            $pathNode = $_.SelectSingleNode('un:Path', $namespaceManager)
+            $null -ne $pathNode -and $pathNode.InnerText -match '(?i)\\FFUDL\\Apply\.ps1'
+        })
+    if ($driveLetterCommands.Count -ne 1) {
+        throw "Expected exactly one data partition drive-letter specialize command in $UnattendPath."
+    }
+
+    $driveLetterCommand = $driveLetterCommands[0]
+    $orderNode = $driveLetterCommand.SelectSingleNode('un:Order', $namespaceManager)
+    $willRebootNode = $driveLetterCommand.SelectSingleNode('un:WillReboot', $namespaceManager)
+    if ($null -eq $orderNode -or $orderNode.InnerText -ne '1') {
+        throw "Data partition drive-letter specialize command is not first in $UnattendPath."
+    }
+    if ($null -eq $willRebootNode -or $willRebootNode.InnerText -ne 'OnRequest') {
+        throw "Data partition drive-letter specialize command does not use WillReboot=OnRequest in $UnattendPath."
+    }
+    if ($driveLetterCommand.GetAttribute('action', $wcmNamespace) -ne 'add') {
+        throw "Data partition drive-letter specialize command does not use wcm:action=add in $UnattendPath."
+    }
+    foreach ($otherCommand in @($commands | Where-Object { $_ -ne $driveLetterCommand })) {
+        $otherOrderNode = $otherCommand.SelectSingleNode('un:Order', $namespaceManager)
+        $otherOrder = 0
+        if ($null -eq $otherOrderNode -or -not [int]::TryParse($otherOrderNode.InnerText, [ref]$otherOrder) -or $otherOrder -le 1) {
+            throw "Another specialize command conflicts with first order in $UnattendPath."
+        }
+    }
+
+    WriteLog "Verified data partition drive-letter specialize command in $UnattendPath."
+}
+
 function Test-LegacyPromptComputerName($computername) {
     if ([string]::IsNullOrWhiteSpace($computername)) {
         return $false
@@ -1603,6 +1832,15 @@ if ($null -eq $windowsVolume) {
 }
 WriteLog "Successfully assigned drive letter 'W'."
 
+$dataPartitionDriveLetterDeploymentContext = $null
+try {
+    $dataPartitionDriveLetterDeploymentContext = Get-FFUDataPartitionDriveLetterDeploymentContext -WindowsPartitionRoot 'W:\'
+}
+catch {
+    WriteLog "Validating data partition drive-letter deployment artifacts failed with error: $_"
+    Stop-Script -Message "Validating data partition drive-letter deployment artifacts failed with error: $_"
+}
+
 $recoveryPartition = Get-Partition -DiskNumber $DiskID | Where-Object Type -eq Recovery | Select-Object -First 1
 if ($recoveryPartition) {
     WriteLog 'Setting recovery partition attributes'
@@ -1699,6 +1937,25 @@ If ($Unattend) {
         WriteLog 'Copying Unattend.xml to Panther failed'
         Stop-Script -Message "Copying Unattend.xml to Panther failed with error: $_"
     }   
+}
+
+if ($null -ne $dataPartitionDriveLetterDeploymentContext) {
+    $deploymentUnattendPath = 'W:\Windows\Panther\Unattend.xml'
+    try {
+        if ($Unattend) {
+            WriteLog "Merging data partition drive-letter persistence into custom unattend at $deploymentUnattendPath."
+            Add-FFUDataPartitionDriveLetterCommandToAppliedUnattend -UnattendPath $deploymentUnattendPath -ProcessorArchitecture $dataPartitionDriveLetterDeploymentContext.ProcessorArchitecture
+        }
+        else {
+            WriteLog "No custom unattend was supplied. Verifying the FFU-embedded data partition drive-letter command at $deploymentUnattendPath."
+        }
+
+        Test-FFUDataPartitionDriveLetterCommandInAppliedUnattend -UnattendPath $deploymentUnattendPath -ProcessorArchitecture $dataPartitionDriveLetterDeploymentContext.ProcessorArchitecture
+    }
+    catch {
+        WriteLog "Preparing data partition drive-letter deployment hook failed with error: $_"
+        Stop-Script -Message "Preparing data partition drive-letter deployment hook failed with error: $_"
+    }
 }
 
 # Add Drivers

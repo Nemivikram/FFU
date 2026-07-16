@@ -412,6 +412,8 @@
                                                 <Button x:Name="btnAddDataPartition" Grid.Row="1" Grid.Column="5" Content="Add Data Partition" Width="160" ToolTip="Add the configured data partition to the build configuration."/>
                                             </Grid>
 
+                                            <TextBlock Text="VHDX Partition Layout" FontWeight="SemiBold" Margin="0,0,0,8"/>
+
                                             <Grid Margin="0,0,0,12">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*"/>

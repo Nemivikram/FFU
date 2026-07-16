@@ -106,7 +106,7 @@ Sets a custom FFU output name with placeholders. Allowed placeholders are: {Wind
 Size of the virtual hard disk for the virtual machine. Default is a 50GB dynamic disk.
 
 .PARAMETER OSPartitionSize
-Fixed size of the Windows partition in bytes. Required when AdditionalDataPartitions are configured so space remains for Recovery and data partitions.
+Fixed size of the Windows partition in bytes. Leave as 0 to let Windows use the space remaining after Recovery and fixed-size data partitions are reserved.
 
 .PARAMETER RecoveryPartitionSize
 Optional fixed size of the Recovery partition in bytes. Leave as 0 to calculate the Recovery partition size from winre.wim plus buffer space.
@@ -3327,6 +3327,44 @@ function New-OSPartition {
     
     WriteLog 'Done'    
     return $osPartition
+}
+function Resize-OSPartitionForDataPartitions {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ciminstance]$OsPartition,
+        [object[]]$DataPartitions = @()
+    )
+
+    $fixedDataPartitions = @($DataPartitions | Where-Object { -not $_.FillRemaining })
+    if ($fixedDataPartitions.Count -eq 0) {
+        return $OsPartition
+    }
+
+    [uint64]$dataPartitionReserveSize = 0
+    foreach ($dataPartition in $fixedDataPartitions) {
+        [uint64]$dataPartitionSize = $dataPartition.SizeBytes
+        if ($dataPartitionSize -le 0) {
+            throw "Data partition '$($dataPartition.Name)' must have a positive fixed size before space can be reserved."
+        }
+
+        $dataPartitionReserveSize += $dataPartitionSize + 1MB
+    }
+
+    WriteLog "Reserving $dataPartitionReserveSize bytes from the maximum-size Windows partition for $($fixedDataPartitions.Count) fixed data partition(s)."
+    if ($OsPartition.Size -le $dataPartitionReserveSize) {
+        throw "Windows partition is too small to reserve $dataPartitionReserveSize bytes for fixed data partitions. Current Windows partition size is $($OsPartition.Size) bytes."
+    }
+
+    $newOsPartitionSize = [math]::Floor(($OsPartition.Size - $dataPartitionReserveSize) / 4096) * 4096
+    $supportedOsPartitionSize = $OsPartition | Get-PartitionSupportedSize -ErrorAction Stop
+    if ($newOsPartitionSize -lt $supportedOsPartitionSize.SizeMin) {
+        throw "Windows partition cannot be shrunk enough to reserve $dataPartitionReserveSize bytes for fixed data partitions. Minimum supported Windows partition size is $($supportedOsPartitionSize.SizeMin) bytes."
+    }
+
+    $OsPartition | Resize-Partition -Size $newOsPartitionSize -ErrorAction Stop | Out-Null
+    WriteLog "Windows partition shrunk to $newOsPartitionSize bytes to reserve space for fixed data partitions."
+
+    return Get-Partition -DiskNumber $OsPartition.DiskNumber -PartitionNumber $OsPartition.PartitionNumber -ErrorAction Stop
 }
 #Add Recovery partition
 function New-RecoveryPartition {
@@ -6681,14 +6719,10 @@ Set-Progress -Percentage 2 -Message "Validating parameters..."
 try {
     $normalizedAdditionalDataPartitions = ConvertTo-NormalizedDataPartitions -DataPartitions $AdditionalDataPartitions
     $persistDataPartitionDriveLetters = @($normalizedAdditionalDataPartitions | Where-Object { $_.PersistDriveLetter }).Count -gt 0
-    if ($normalizedAdditionalDataPartitions.Count -gt 0 -and $OSPartitionSize -le 0) {
-        $osPartitionSizeMessage = if ($CreateRecoveryPartition) {
-            'OSPartitionSize must be set when AdditionalDataPartitions are configured so space remains for Recovery and data partitions.'
-        }
-        else {
-            'OSPartitionSize must be set when AdditionalDataPartitions are configured so space remains for data partitions.'
-        }
-        throw $osPartitionSizeMessage
+    $fillRemainingPartitionCount = if ($OSPartitionSize -le 0) { 1 } else { 0 }
+    $fillRemainingPartitionCount += @($normalizedAdditionalDataPartitions | Where-Object { $_.FillRemaining }).Count
+    if ($fillRemainingPartitionCount -gt 1) {
+		throw 'Only one Windows or data partition can fill remaining disk space. Set a fixed Windows partition size before using FillRemaining on a data partition.'
     }
     $partitionLayoutSignature = Get-PartitionLayoutSignature -OSPartitionSize $OSPartitionSize -RecoveryPartitionSize $RecoveryPartitionSize -CreateRecoveryPartition $CreateRecoveryPartition -DataPartitions $normalizedAdditionalDataPartitions
 
@@ -8329,11 +8363,15 @@ try {
     
         Set-Progress -Percentage 16 -Message "Applying base Windows image to VHDX..."
         $osPartition = New-OSPartition -VhdxDisk $vhdxDisk -OSPartitionSize $OSPartitionSize -WimPath $WimPath -WimIndex $index -DriveLetter $WindowsPartitionDriveLetter
-        $osPartitionDriveLetter = $osPartition[1].DriveLetter
+        $osPartitionObject = $osPartition[1]
+        if ($OSPartitionSize -le 0) {
+			$osPartitionObject = Resize-OSPartitionForDataPartitions -OsPartition $osPartitionObject -DataPartitions $normalizedAdditionalDataPartitions
+		}
+        $osPartitionDriveLetter = $osPartitionObject.DriveLetter
         $WindowsPartition = $osPartitionDriveLetter + ':\'
 
         if ($CreateRecoveryPartition) {
-            $recoveryPartition = New-RecoveryPartition -VhdxDisk $vhdxDisk -OsPartition $osPartition[1] -RecoveryPartitionSize $RecoveryPartitionSize -DriveLetter $RecoveryPartitionDriveLetter -OsPartitionUsesMaximumSize ($OSPartitionSize -le 0)
+            $recoveryPartition = New-RecoveryPartition -VhdxDisk $vhdxDisk -OsPartition $osPartitionObject -RecoveryPartitionSize $RecoveryPartitionSize -DriveLetter $RecoveryPartitionDriveLetter -OsPartitionUsesMaximumSize ($OSPartitionSize -le 0)
         }
         else {
             WriteLog 'CreateRecoveryPartition is false. Skipping Windows Recovery partition creation.'

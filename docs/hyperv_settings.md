@@ -49,13 +49,13 @@ The partition list shows the build order: System, MSR, Windows, Recovery, and op
 
 The System, Windows, and Recovery selections are host-side build letters only. Installed Windows uses `C:` for its Windows partition, while System and Recovery normally have no letter. The deployment script discovers these partitions from the applied disk instead of relying on the build letters.
 
-Leave the Windows size blank to let Windows fill the remaining disk. Set a fixed Windows size before adding data partitions so the VHDX has space left for Recovery and data volumes.
+Leave the Windows size blank to let Windows use the space remaining after Recovery and fixed-size data partitions are reserved. This allows you to give a data partition a fixed size while Windows uses the rest of the VHDX. If a data partition will use **Fill Remaining**, give Windows a fixed size first because only one partition can fill the remaining space.
 
 Use the Recovery size only when you need a fixed Recovery partition size. Leave it blank to let the build calculate the Recovery size from `winre.wim` plus buffer space.
 
 The Recovery partition can be removed by selecting its row checkbox and using **Remove Selected**. Use **Restore Recovery** to add it back before saving or building. Removing Recovery saves `CreateRecoveryPartition` as `false` in the generated config.
 
-Each data partition has a name, a drive letter from `D:` through `Z:`, and either a size in GB or **Fill Remaining**. Only one data partition can use **Fill Remaining**. Data partitions can be reordered with the arrow buttons. **Clear** removes only data partitions, not the base partition rows.
+Each data partition has a name, a drive letter from `D:` through `Z:`, and either a size in GB or **Fill Remaining**. Only one Windows or data partition can use **Fill Remaining**. Data partitions can be reordered with the arrow buttons. **Clear** removes only data partitions, not the base partition rows.
 
 **Persist Drive Letter** is off by default. When selected for a data partition, FFU Builder requires that partition to use its configured letter before build-VM application scripts run and when a deployed device enters the Windows `specialize` pass. If another volume already owns the requested letter, the build or deployment stops instead of moving that volume or selecting another letter.
 

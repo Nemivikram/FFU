@@ -431,16 +431,13 @@ function Get-DiskLayoutPartitionRows {
         $State.Data.createRecoveryPartition = $true
     }
 
-    $hasDataPartitions = @($State.Data.additionalDataPartitionsDataList).Count -gt 0
     $windowsSizeText = [string]$State.Controls.txtOSPartitionSizeGB.Text
-    $windowsCanFillRemaining = -not $hasDataPartitions
-    $windowsFillRemaining = $windowsCanFillRemaining -and [string]::IsNullOrWhiteSpace($windowsSizeText)
-    $windowsFillRemainingVisibility = if ($windowsCanFillRemaining) { 'Visible' } else { 'Hidden' }
+    $windowsFillRemaining = [string]::IsNullOrWhiteSpace($windowsSizeText)
 
     $rows = [System.Collections.Generic.List[PSCustomObject]]::new()
     $rows.Add((New-DiskLayoutPartitionRow -PartitionType 'System' -Name 'System' -DriveLetter (Get-ComboBoxDriveLetterValue -ComboBox $State.Controls.cmbSystemPartitionDriveLetter -DefaultValue 'S') -SizeGB '0.26' -SizeBytes 260MB -CanEditDriveLetter $true -CanEditSize $false -CanEditFillRemaining $false -FillRemainingVisibility 'Hidden' -CanRemove $false -CanReorder $false))
     $rows.Add((New-DiskLayoutPartitionRow -PartitionType 'MSR' -Name 'MSR' -SizeGB '0.016' -SizeBytes 16MB -CanEditDriveLetter $false -CanEditSize $false -CanEditFillRemaining $false -FillRemainingVisibility 'Hidden' -CanRemove $false -CanReorder $false))
-    $rows.Add((New-DiskLayoutPartitionRow -PartitionType 'Windows' -Name 'Windows' -DriveLetter (Get-ComboBoxDriveLetterValue -ComboBox $State.Controls.cmbWindowsPartitionDriveLetter -DefaultValue 'W') -SizeGB $windowsSizeText -SizeBytes (ConvertTo-PartitionSizeBytesFromGBText -Text $windowsSizeText -FieldName 'Windows Partition Size') -FillRemaining $windowsFillRemaining -CanEditDriveLetter $true -CanEditSize $true -CanEditFillRemaining $windowsCanFillRemaining -FillRemainingVisibility $windowsFillRemainingVisibility -CanRemove $false -CanReorder $false))
+    $rows.Add((New-DiskLayoutPartitionRow -PartitionType 'Windows' -Name 'Windows' -DriveLetter (Get-ComboBoxDriveLetterValue -ComboBox $State.Controls.cmbWindowsPartitionDriveLetter -DefaultValue 'W') -SizeGB $windowsSizeText -SizeBytes (ConvertTo-PartitionSizeBytesFromGBText -Text $windowsSizeText -FieldName 'Windows Partition Size') -FillRemaining $windowsFillRemaining -CanEditDriveLetter $true -CanEditSize $true -CanEditFillRemaining $true -FillRemainingVisibility 'Visible' -CanRemove $false -CanReorder $false))
 
     if ([bool]$State.Data.createRecoveryPartition) {
         $rows.Add((New-DiskLayoutPartitionRow -PartitionType 'Recovery' -Name 'Recovery' -DriveLetter (Get-ComboBoxDriveLetterValue -ComboBox $State.Controls.cmbRecoveryPartitionDriveLetter -DefaultValue 'R') -SizeGB ([string]$State.Controls.txtRecoveryPartitionSizeGB.Text) -SizeBytes (ConvertTo-PartitionSizeBytesFromGBText -Text $State.Controls.txtRecoveryPartitionSizeGB.Text -FieldName 'Recovery Partition Size') -CanSelect $true -CanEditDriveLetter $true -CanEditSize $true -CanEditFillRemaining $false -FillRemainingVisibility 'Hidden' -CanRemove $true -CanReorder $false))
@@ -583,8 +580,6 @@ function Get-DiskLayoutCapacityStatus {
     $fixedPartitionSizeBytes = [int64]0
     $fillRemainingPartitionNames = [System.Collections.Generic.List[string]]::new()
     $hasAutoSizedRecovery = $false
-    $dataPartitionCount = @($partitionRows | Where-Object { $_.PartitionType -eq 'Data' }).Count
-
     foreach ($partitionRow in $partitionRows) {
         if ($partitionRow.PartitionType -eq 'Recovery' -and -not [bool]$State.Data.createRecoveryPartition) { continue }
 
@@ -593,8 +588,8 @@ function Get-DiskLayoutCapacityStatus {
             continue
         }
 
-        if ($partitionRow.PartitionType -eq 'Windows' -and $dataPartitionCount -gt 0 -and [string]::IsNullOrWhiteSpace([string]$partitionRow.SizeGB)) {
-            return [PSCustomObject]@{ Level = 'Red'; Message = 'Set a fixed Windows partition size before adding data partitions.' }
+        if ($partitionRow.PartitionType -eq 'Windows' -and [string]::IsNullOrWhiteSpace([string]$partitionRow.SizeGB)) {
+            return [PSCustomObject]@{ Level = 'Red'; Message = 'Windows must have a size or Fill Remaining selected.' }
         }
 
         if ($partitionRow.PartitionType -eq 'Recovery' -and [string]::IsNullOrWhiteSpace([string]$partitionRow.SizeGB)) {
@@ -687,6 +682,13 @@ function Update-DiskLayoutFillRemainingState {
     )
 
     if ($PartitionRow.FillRemaining) {
+        foreach ($otherPartitionRow in @($State.Controls.lstDataPartitions.ItemsSource)) {
+            if ([object]::ReferenceEquals($otherPartitionRow, $PartitionRow)) { continue }
+            if ([bool]$otherPartitionRow.CanEditFillRemaining -and [bool]$otherPartitionRow.FillRemaining) {
+                $otherPartitionRow.FillRemaining = $false
+            }
+        }
+
         $PartitionRow.SizeGB = ''
         $PartitionRow.SizeBytes = 0
         if ($PartitionRow.PartitionType -eq 'Windows') {
@@ -844,14 +846,13 @@ function Test-DiskLayoutConfiguration {
     }
 
     $dataPartitions = @($Config.AdditionalDataPartitions)
-    if ($dataPartitions.Count -gt 0 -and $Config.OSPartitionSize -le 0) {
-        $errors.Add('Windows must use a fixed size when data partitions are configured.')
+    $windowsPartitionRow = $partitionRows | Where-Object { $_.PartitionType -eq 'Windows' } | Select-Object -First 1
+    $windowsFillRemaining = if ($null -ne $windowsPartitionRow) { [bool]$windowsPartitionRow.FillRemaining } else { $Config.OSPartitionSize -le 0 }
+    if (-not $windowsFillRemaining -and $Config.OSPartitionSize -le 0) {
+        $errors.Add('Windows must have a size or Fill Remaining selected.')
     }
 
-    $fillRemainingCount = 0
-    if ($Config.OSPartitionSize -le 0) {
-        $fillRemainingCount++
-    }
+    $fillRemainingCount = if ($windowsFillRemaining) { 1 } else { 0 }
     $fillRemainingCount += @($dataPartitions | Where-Object { $_.FillRemaining }).Count
     if ($fillRemainingCount -gt 1) {
         $errors.Add('Only one partition can fill remaining disk space.')
@@ -950,11 +951,6 @@ function Add-AdditionalDataPartition {
         $reservedDriveLetters += ([string](Get-ComboBoxSelectedContent -ComboBox $State.Controls.cmbRecoveryPartitionDriveLetter)).Trim().TrimEnd(':').ToUpperInvariant()
     }
 
-    if ([string]::IsNullOrWhiteSpace([string]$State.Controls.txtOSPartitionSizeGB.Text)) {
-        [System.Windows.MessageBox]::Show("Set a fixed Windows partition size before adding data partitions. Windows can fill remaining space only when no data partitions are configured.", "Windows Partition Size Required", "OK", "Warning") | Out-Null
-        return $false
-    }
-
     if ($reservedDriveLetters -contains $driveLetter) {
         [System.Windows.MessageBox]::Show("Drive letter $driveLetter is already used by a required build partition.", "Duplicate Drive Letter", "OK", "Warning") | Out-Null
         return $false
@@ -967,6 +963,10 @@ function Add-AdditionalDataPartition {
 
     $fillRemaining = $true -eq $State.Controls.chkDataPartitionFillRemaining.IsChecked
     $persistDriveLetter = $true -eq $State.Controls.chkDataPartitionPersistDriveLetter.IsChecked
+    if ($fillRemaining -and [string]::IsNullOrWhiteSpace([string]$State.Controls.txtOSPartitionSizeGB.Text)) {
+        [System.Windows.MessageBox]::Show("Set a fixed Windows partition size before making a data partition fill the remaining VHDX space.", "Windows Partition Size Required", "OK", "Warning") | Out-Null
+        return $false
+    }
     if ($fillRemaining -and ($State.Data.additionalDataPartitionsDataList | Where-Object { $_.FillRemaining } | Select-Object -First 1)) {
         [System.Windows.MessageBox]::Show("Only one data partition can fill the remaining VHDX space.", "Fill Remaining Already Used", "OK", "Warning") | Out-Null
         return $false

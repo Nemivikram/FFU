@@ -72,7 +72,7 @@ This table lists all top-level parameters in BuildFFUVM.ps1.
 | -OfficeConfigXMLFile | string | Office Configuration XML File | Path to a custom Office configuration XML file to use for installation. |
 | -Optimize | bool | Optimize | When set to $true, will optimize the FFU file. Default is $true. |
 | -OptimizeFFUPartitionNumber | int | CLI/config only | Optional partition number to pass to DISM /Optimize-FFU /PartitionNumber. Leave as 0 to optimize the Fill Remaining partition, or Windows when no partition uses Fill Remaining. |
-| -OSPartitionSize | uint64 | Disk Layout: Windows Size (GB) | Fixed size of the Windows partition in bytes. Required when -AdditionalDataPartitions is configured so the VHDX has room for data partitions. The UI stores this from the GB value. |
+| -OSPartitionSize | uint64 | Disk Layout: Windows Size (GB) | Optional fixed size of the Windows partition in bytes. Leave it at 0 to let Windows use the space remaining after Recovery and fixed-size data partitions are reserved. Set a fixed size when a data partition uses FillRemaining because only one partition can fill the remaining space. The UI stores this from the GB value. |
 | -OptionalFeatures | string | Optional Features | Provide a semicolon-separated list of Windows optional features you want to include in the FFU (e.g., netfx3;TFTP). |
 | -OrchestrationPath | string | Application Path (derived Orchestration path) | Path to the orchestration folder containing scripts that run inside the VM. Default is $FFUDevelopmentPath\Apps\Orchestration. |
 | -PEDriversFolder | string | PE Drivers Folder | Path to the folder containing drivers to be injected into the WinPE deployment media. Default is $FFUDevelopmentPath\PEDrivers. |

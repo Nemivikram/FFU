@@ -441,13 +441,6 @@ $script:uiState.Controls.btnRun.Add_Click({
                 return
             }
 
-            if (($null -ne $config.AdditionalDataPartitions) -and ($config.AdditionalDataPartitions.Count -gt 0) -and ($config.OSPartitionSize -le 0)) {
-                [System.Windows.MessageBox]::Show("Set Windows Partition Size (GB) before adding data partitions so the VHDX has reserved space for Recovery and data partitions.", "Windows Partition Size Required", "OK", "Warning") | Out-Null
-                $btnRun.IsEnabled = $true
-                $script:uiState.Controls.txtStatus.Text = "Build canceled: Windows partition size required for data partitions."
-                return
-            }
-
             if ($config.EnableVMNetworking -and $config.InstallApps -and [string]::IsNullOrWhiteSpace([string]$config.VMSwitchName)) {
                 [System.Windows.MessageBox]::Show("Select or enter a VM Switch Name before enabling VM networking.", "VM Switch Required", "OK", "Warning") | Out-Null
                 $btnRun.IsEnabled = $true

@@ -6717,7 +6717,7 @@ Set-Progress -Percentage 2 -Message "Validating parameters..."
 
 #Set build partition drive letters and validate they are available for use; this is required before any build steps that require drive access to ensure the expected drive letters are reserved and to fail fast if there are conflicts.
 try {
-    $normalizedAdditionalDataPartitions = ConvertTo-NormalizedDataPartitions -DataPartitions $AdditionalDataPartitions
+    $normalizedAdditionalDataPartitions = @(ConvertTo-NormalizedDataPartitions -DataPartitions $AdditionalDataPartitions)
     $persistDataPartitionDriveLetters = @($normalizedAdditionalDataPartitions | Where-Object { $_.PersistDriveLetter }).Count -gt 0
     $fillRemainingPartitionCount = if ($OSPartitionSize -le 0) { 1 } else { 0 }
     $fillRemainingPartitionCount += @($normalizedAdditionalDataPartitions | Where-Object { $_.FillRemaining }).Count

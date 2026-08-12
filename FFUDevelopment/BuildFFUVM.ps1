@@ -1531,39 +1531,30 @@ function Get-LenovoDrivers {
             [string]$ModelName
         )
 
-        # Lenovo is special - they prevent access to the PSREF API without a cookie as of July 2025. 
-        # This cookie must be retrieved via Javascript
-        # It appears that the cookie is hard-coded. We'll see how long this lasts.
-        # If anyone knows how to reliably get the the model and machine type information from Lenovo, let me know.
-        # https://download.lenovo.com/cdrt/td/catalogv2.xml only provides a subset of the information available from PSREF (e.g. it's missing 300w, 500w, and other consumer models).
-
-        $lenovoCookie = "X-PSREF-USER-TOKEN=eyJ0eXAiOiJKV1QifQ.bjVTdWk0YklZeUc2WnFzL0lXU0pTeU1JcFo0aExzRXl1UGxHN3lnS1BtckI0ZVU5WEJyVGkvaFE0NmVNU2U1ZjNrK3ZqTEVIZ29nTk1TNS9DQmIwQ0pTN1Q1VytlY1RpNzZTUldXbm4wZ1g2RGJuQWg4MXRkTmxKT2YrOW9LRjBzQUZzV05HM3NpcU92WFVTM0o0blM1SDQyUlVXNThIV1VBS2R0c1B2NjJyQjIrUGxNZ2x6RTRhUjY5UDZWclBX.ZDBmM2EyMWRjZTg2N2JmYWMxZDIxY2NiYjQzMWFhNjg1YjEzZTAxNmU2M2RmN2M5ZjIyZWJhMzZkOWI1OWJhZg"
-    
-        # Wrote a separate function to grab the token. Check the function notes for more details. Keep the above comment for now to see if the cookie ever changes.
-        # 3/25/2026 - The cookie is still the same after 8 months, but we'll keep the retrieval function in case it changes in the future or if we need to get a new one.
-        # $lenovoCookie = Get-LenovoPSREFToken
-
-        # Add the cookie to the headers
-        $Headers["Cookie"] = $lenovoCookie
-
-        $url = "https://psref.lenovo.com/api/search/DefinitionFilterAndSearch/Suggest?kw=$ModelName"
-        WriteLog "Querying Lenovo PSREF API for model: $ModelName"
-        $OriginalVerbosePreference = $VerbosePreference
-        $VerbosePreference = 'SilentlyContinue'
-        $response = Invoke-WebRequest -Uri $url -UseBasicParsing -Headers $Headers -UserAgent $UserAgent
-        $VerbosePreference = $OriginalVerbosePreference
-        WriteLog "Complete"
-
-        $jsonResponse = $response.Content | ConvertFrom-Json
+        $normalizedModelName = $ModelName.Trim()
+        $searchType = if ($normalizedModelName.Length -eq 4) { 'MT' } elseif ($normalizedModelName.Length -eq 10) { 'Model' } else { 'Normal' }
+        $cacheBuster = ([System.Random]::new().NextDouble()).ToString('0.################', [Globalization.CultureInfo]::InvariantCulture)
+        $url = "https://psref.lenovo.com/api/search/DefinitionFilterAndSearch/Suggest?kw=$([uri]::EscapeDataString($normalizedModelName))&limit=6&IsPreviewProduct=true&SearchType=$searchType&t=$cacheBuster"
+        WriteLog "Querying Lenovo PSREF API for model: $normalizedModelName"
+        $requestHeaders = Get-LenovoPSREFRequestHeaders -Method GET -Uri $url -Headers $Headers -UserAgent $UserAgent
+        $originalVerbosePreference = $VerbosePreference
+        try {
+            $VerbosePreference = 'SilentlyContinue'
+            $jsonResponse = Invoke-RestMethod -Uri $url -Headers $requestHeaders -UserAgent $UserAgent -ErrorAction Stop
+        }
+        finally {
+            $VerbosePreference = $originalVerbosePreference
+        }
+        WriteLog "Lenovo PSREF API query complete."
 
         $products = @()
         foreach ($item in $jsonResponse.data) {
             if (-not [string]::IsNullOrEmpty($item.MachineType) -and -not [string]::IsNullOrEmpty($item.ProductName)) {
                 $productName = $item.ProductName
-                $machineTypes = $item.MachineType -split " / "
+                $machineTypes = $item.MachineType -split '\s*/\s*'
 
                 foreach ($machineType in $machineTypes) {
-                    if ($machineType -eq $ModelName) {
+                    if ($machineType -eq $normalizedModelName) {
                         WriteLog "Model name entered is a matching machine type"
                         $products = @()
                         $products += [pscustomobject]@{

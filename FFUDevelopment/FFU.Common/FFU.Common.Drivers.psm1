@@ -457,6 +457,143 @@ function Test-ExistingDriver {
     # If neither WIM nor a valid folder exists, return null
     return $null
 }
+
+$script:LenovoPSREFAuthContext = $null
+
+function Get-LenovoPSREFRequestHeaders {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('GET', 'POST', 'PUT', 'DELETE', 'PATCH')]
+        [string]$Method,
+        [Parameter(Mandatory = $true)]
+        [uri]$Uri,
+        [Parameter()]
+        [AllowEmptyString()]
+        [string]$Body = '',
+        [Parameter()]
+        [hashtable]$Headers = @{},
+        [Parameter()]
+        [string]$UserAgent
+    )
+
+    $currentUnixTime = [long][Math]::Floor(([DateTime]::UtcNow - [DateTime]'1970-01-01').TotalSeconds)
+    if ($null -eq $script:LenovoPSREFAuthContext -or
+        $script:LenovoPSREFAuthContext.ExpiresAt - $currentUnixTime -le 120 -or
+        $script:LenovoPSREFAuthContext.UserAgent -ne $UserAgent) {
+        $authRequestParameters = @{
+            Uri         = 'https://psref.lenovo.com/api/home/auth/issue'
+            Method      = 'Post'
+            ContentType = 'application/json'
+            Body        = '{}'
+            Headers     = @{
+                Accept           = 'application/json, text/plain, */*'
+                Origin           = 'https://psref.lenovo.com'
+                Referer          = 'https://psref.lenovo.com/'
+                'Sec-Fetch-Dest' = 'empty'
+                'Sec-Fetch-Mode' = 'cors'
+                'Sec-Fetch-Site' = 'same-origin'
+            }
+            ErrorAction = 'Stop'
+        }
+        if (-not [string]::IsNullOrWhiteSpace($UserAgent)) {
+            $authRequestParameters.UserAgent = $UserAgent
+        }
+
+        WriteLog 'Requesting a Lenovo PSREF API access token.'
+        $authResponse = Invoke-RestMethod @authRequestParameters
+        $accessToken = [string]$authResponse.access_token
+        if ([string]::IsNullOrWhiteSpace($accessToken)) {
+            throw 'Lenovo PSREF authentication returned an empty access token.'
+        }
+
+        $tokenParts = $accessToken.Split('.')
+        if ($tokenParts.Count -ne 3) {
+            throw 'Lenovo PSREF authentication returned an invalid access token.'
+        }
+
+        $payloadSegment = $tokenParts[1].Replace('-', '+').Replace('_', '/')
+        switch ($payloadSegment.Length % 4) {
+            2 { $payloadSegment += '==' }
+            3 { $payloadSegment += '=' }
+            1 { throw 'Lenovo PSREF authentication returned an invalid token payload.' }
+        }
+
+        try {
+            $payloadBytes = [Convert]::FromBase64String($payloadSegment)
+            $tokenPayload = [Text.Encoding]::UTF8.GetString($payloadBytes) | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            throw "Unable to decode the Lenovo PSREF access token: $($_.Exception.Message)"
+        }
+
+        $signatureSecret = [string]$tokenPayload.ss
+        $expiresAt = [long]$tokenPayload.exp
+        if ([string]::IsNullOrWhiteSpace($signatureSecret) -or $signatureSecret -notmatch '^(?:[0-9a-fA-F]{2})+$') {
+            throw 'Lenovo PSREF authentication returned an invalid signing secret.'
+        }
+        if ($expiresAt -le $currentUnixTime) {
+            throw 'Lenovo PSREF authentication returned an expired access token.'
+        }
+
+        $script:LenovoPSREFAuthContext = [PSCustomObject]@{
+            AccessToken    = $accessToken
+            SignatureSecret = $signatureSecret
+            ExpiresAt       = $expiresAt
+            UserAgent       = $UserAgent
+        }
+        WriteLog 'Lenovo PSREF API access token acquired.'
+    }
+
+    $requestHeaders = @{}
+    foreach ($key in $Headers.Keys) {
+        if ($key -notmatch '^(Accept|Authorization|Cookie|Priority|Sec-|Upgrade-Insecure-Requests|X-)') {
+            $requestHeaders[$key] = $Headers[$key]
+        }
+    }
+    $requestHeaders.Accept = 'application/json, text/plain, */*'
+    $requestHeaders.Referer = 'https://psref.lenovo.com/'
+    $requestHeaders['Sec-Fetch-Dest'] = 'empty'
+    $requestHeaders['Sec-Fetch-Mode'] = 'cors'
+    $requestHeaders['Sec-Fetch-Site'] = 'same-origin'
+
+    $bodyHash = ''
+    if (-not [string]::IsNullOrEmpty($Body)) {
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            $bodyHashBytes = $sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($Body))
+            $bodyHash = -join ($bodyHashBytes | ForEach-Object { $_.ToString('x2') })
+        }
+        finally {
+            $sha256.Dispose()
+        }
+    }
+
+    $timestamp = [long][Math]::Floor(([DateTime]::UtcNow - [DateTime]'1970-01-01').TotalSeconds)
+    $nonce = [guid]::NewGuid().ToString()
+    $canonicalRequest = "$($Method.ToUpperInvariant())|$($Uri.PathAndQuery)|$bodyHash|$timestamp|$nonce"
+    $signatureSecret = $script:LenovoPSREFAuthContext.SignatureSecret
+    $secretBytes = New-Object byte[] ($signatureSecret.Length / 2)
+    for ($characterIndex = 0; $characterIndex -lt $signatureSecret.Length; $characterIndex += 2) {
+        $secretBytes[$characterIndex / 2] = [Convert]::ToByte($signatureSecret.Substring($characterIndex, 2), 16)
+    }
+
+    $hmac = [Security.Cryptography.HMACSHA256]::new($secretBytes)
+    try {
+        $signatureBytes = $hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonicalRequest))
+        $signature = -join ($signatureBytes | ForEach-Object { $_.ToString('x2') })
+    }
+    finally {
+        $hmac.Dispose()
+    }
+
+    $requestHeaders.Authorization = "Bearer $($script:LenovoPSREFAuthContext.AccessToken)"
+    $requestHeaders['X-Ts'] = $timestamp.ToString()
+    $requestHeaders['X-Nonce'] = $nonce
+    $requestHeaders['X-Sig'] = $signature
+    return $requestHeaders
+}
+
 function Get-LenovoPSREFToken {
 
     <# 
@@ -819,4 +956,5 @@ Export-ModuleMember -Function `
     Compress-DriverFolderToWim, `
     Update-DriverMappingJson, `
     Test-ExistingDriver, `
+    Get-LenovoPSREFRequestHeaders, `
     Get-LenovoPSREFToken

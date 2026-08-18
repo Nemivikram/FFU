@@ -71,6 +71,17 @@ function Invoke-SysprepProcess {
     return $sysprepProcess.ExitCode
 }
 
+$orchestrationBootstrapPath = 'C:\Windows\Setup\Scripts\Start-FFUOrchestration.ps1'
+if (Test-Path -LiteralPath $orchestrationBootstrapPath -PathType Leaf) {
+    Write-Host "Removing build-only orchestration bootstrap: $orchestrationBootstrapPath"
+    try {
+        Remove-Item -LiteralPath $orchestrationBootstrapPath -Force -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "Unable to remove build-only orchestration bootstrap '$orchestrationBootstrapPath': $($_.Exception.Message)"
+    }
+}
+
 Write-Host "Removing existing unattend.xml files and stopping sysprep process if running..."
 Remove-Item -Path "C:\windows\panther\unattend\unattend.xml" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "C:\windows\panther\unattend.xml" -Force -ErrorAction SilentlyContinue

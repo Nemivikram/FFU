@@ -458,6 +458,30 @@ function Test-ExistingDriver {
     return $null
 }
 
+function ConvertTo-LenovoPSREFSigningKey {
+    [CmdletBinding()]
+    [OutputType([byte[]])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$SigningSecret
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SigningSecret)) {
+        throw 'Lenovo PSREF authentication returned an empty signing key.'
+    }
+    if ($SigningSecret -notmatch '^(?:[0-9a-fA-F]{2})+$') {
+        throw 'Lenovo PSREF authentication returned an unsupported signing-key representation.'
+    }
+
+    $signingKey = [byte[]]::new($SigningSecret.Length / 2)
+    for ($characterIndex = 0; $characterIndex -lt $SigningSecret.Length; $characterIndex += 2) {
+        $signingKey[$characterIndex / 2] = [Convert]::ToByte($SigningSecret.Substring($characterIndex, 2), 16)
+    }
+
+    return $signingKey
+}
+
 $script:LenovoPSREFAuthContext = $null
 
 function Get-LenovoPSREFRequestHeaders {
@@ -527,20 +551,28 @@ function Get-LenovoPSREFRequestHeaders {
             throw "Unable to decode the Lenovo PSREF access token: $($_.Exception.Message)"
         }
 
-        $signatureSecret = [string]$tokenPayload.ss
-        $expiresAt = [long]$tokenPayload.exp
-        if ([string]::IsNullOrWhiteSpace($signatureSecret) -or $signatureSecret -notmatch '^(?:[0-9a-fA-F]{2})+$') {
-            throw 'Lenovo PSREF authentication returned an invalid signing secret.'
+        $signingKeyProperty = $tokenPayload.PSObject.Properties['rk']
+        if ($null -eq $signingKeyProperty) {
+            $signingKeyProperty = $tokenPayload.PSObject.Properties['ss']
         }
+        if ($null -eq $signingKeyProperty) {
+            throw 'Lenovo PSREF authentication token is missing a supported signing-key claim.'
+        }
+        if ($signingKeyProperty.Value -isnot [string]) {
+            throw 'Lenovo PSREF authentication returned an unsupported signing-key type.'
+        }
+
+        [byte[]]$signingKey = ConvertTo-LenovoPSREFSigningKey -SigningSecret $signingKeyProperty.Value
+        $expiresAt = [long]$tokenPayload.exp
         if ($expiresAt -le $currentUnixTime) {
             throw 'Lenovo PSREF authentication returned an expired access token.'
         }
 
         $script:LenovoPSREFAuthContext = [PSCustomObject]@{
-            AccessToken    = $accessToken
-            SignatureSecret = $signatureSecret
-            ExpiresAt       = $expiresAt
-            UserAgent       = $UserAgent
+            AccessToken = $accessToken
+            SigningKey  = $signingKey
+            ExpiresAt   = $expiresAt
+            UserAgent   = $UserAgent
         }
         WriteLog 'Lenovo PSREF API access token acquired.'
     }
@@ -572,13 +604,7 @@ function Get-LenovoPSREFRequestHeaders {
     $timestamp = [long][Math]::Floor(([DateTime]::UtcNow - [DateTime]'1970-01-01').TotalSeconds)
     $nonce = [guid]::NewGuid().ToString()
     $canonicalRequest = "$($Method.ToUpperInvariant())|$($Uri.PathAndQuery)|$bodyHash|$timestamp|$nonce"
-    $signatureSecret = $script:LenovoPSREFAuthContext.SignatureSecret
-    $secretBytes = New-Object byte[] ($signatureSecret.Length / 2)
-    for ($characterIndex = 0; $characterIndex -lt $signatureSecret.Length; $characterIndex += 2) {
-        $secretBytes[$characterIndex / 2] = [Convert]::ToByte($signatureSecret.Substring($characterIndex, 2), 16)
-    }
-
-    $hmac = [Security.Cryptography.HMACSHA256]::new($secretBytes)
+    $hmac = [Security.Cryptography.HMACSHA256]::new($script:LenovoPSREFAuthContext.SigningKey)
     try {
         $signatureBytes = $hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonicalRequest))
         $signature = -join ($signatureBytes | ForEach-Object { $_.ToString('x2') })

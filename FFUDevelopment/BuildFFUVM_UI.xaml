@@ -431,6 +431,7 @@
                                             <StackPanel Orientation="Horizontal" Margin="0,0,0,0">
                                                 <Button x:Name="btnRemoveSelectedDataPartitions" Content="Remove Selected" Width="140" Margin="0,0,8,0" ToolTip="Remove checked data partitions or the Recovery partition from the list."/>
                                                 <Button x:Name="btnClearDataPartitions" Content="Clear" Width="80" ToolTip="Clear all additional data partitions."/>
+                                                <Button x:Name="btnResetDiskLayoutToDefaults" Content="Reset to Default" Width="140" Margin="8,0,0,0" ToolTip="Restore the default partition layout and remove all additional data partitions. Disk Size and Logical Sector Size are not changed."/>
                                                 <Button x:Name="btnRestoreRecoveryPartition" Content="Restore Recovery" Width="140" Margin="8,0,0,0" Visibility="Collapsed" ToolTip="Restore the Windows Recovery partition after removing it."/>
                                             </StackPanel>
                                         </StackPanel>

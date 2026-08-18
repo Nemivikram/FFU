@@ -270,6 +270,7 @@ function Initialize-UIControls {
     $State.Controls.btnAddDataPartition = $window.FindName('btnAddDataPartition')
     $State.Controls.btnRemoveSelectedDataPartitions = $window.FindName('btnRemoveSelectedDataPartitions')
     $State.Controls.btnClearDataPartitions = $window.FindName('btnClearDataPartitions')
+	$State.Controls.btnResetDiskLayoutToDefaults = $window.FindName('btnResetDiskLayoutToDefaults')
     $State.Controls.btnRestoreRecoveryPartition = $window.FindName('btnRestoreRecoveryPartition')
     $State.Controls.btnMoveDataPartitionTop = $window.FindName('btnMoveDataPartitionTop')
     $State.Controls.btnMoveDataPartitionUp = $window.FindName('btnMoveDataPartitionUp')

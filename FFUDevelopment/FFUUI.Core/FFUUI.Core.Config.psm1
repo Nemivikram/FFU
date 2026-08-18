@@ -799,6 +799,47 @@ function Clear-AdditionalDataPartitions {
     }
 }
 
+function Reset-DiskLayoutToDefaults {
+	param(
+		[Parameter(Mandatory = $true)]
+		[psobject]$State,
+		[switch]$PromptForConfirmation
+	)
+
+	if ($PromptForConfirmation) {
+		$message = "Reset the partition layout to FFU Builder defaults?`n`nThis will restore the default System, MSR, Windows, and Recovery partitions and remove all additional data partitions.`n`nDisk Size and Logical Sector Size will not change."
+		$result = [System.Windows.MessageBox]::Show($message, "Reset Partition Layout", [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Question)
+		if ($result -ne [System.Windows.MessageBoxResult]::Yes) {
+			WriteLog "ResetDiskLayoutToDefaults: User cancelled."
+			return $false
+		}
+	}
+
+	if ($null -eq $State.Data.additionalDataPartitionsDataList) {
+		$State.Data.additionalDataPartitionsDataList = [System.Collections.Generic.List[PSCustomObject]]::new()
+	}
+	else {
+		$State.Data.additionalDataPartitionsDataList.Clear()
+	}
+
+	$State.Controls.cmbSystemPartitionDriveLetter.SelectedItem = ($State.Controls.cmbSystemPartitionDriveLetter.Items | Where-Object { $_.Content -eq $State.Defaults.generalDefaults.SystemPartitionDriveLetter } | Select-Object -First 1)
+	$State.Controls.cmbWindowsPartitionDriveLetter.SelectedItem = ($State.Controls.cmbWindowsPartitionDriveLetter.Items | Where-Object { $_.Content -eq $State.Defaults.generalDefaults.WindowsPartitionDriveLetter } | Select-Object -First 1)
+	$State.Controls.cmbRecoveryPartitionDriveLetter.SelectedItem = ($State.Controls.cmbRecoveryPartitionDriveLetter.Items | Where-Object { $_.Content -eq $State.Defaults.generalDefaults.RecoveryPartitionDriveLetter } | Select-Object -First 1)
+	$State.Controls.txtOSPartitionSizeGB.Clear()
+	$State.Controls.txtRecoveryPartitionSizeGB.Clear()
+	$State.Data.createRecoveryPartition = $true
+
+	Clear-AdditionalDataPartitionForm -State $State
+	$State.Controls.cmbDataPartitionDriveLetter.SelectedItem = ($State.Controls.cmbDataPartitionDriveLetter.Items | Where-Object { $_.Content -eq 'D' } | Select-Object -First 1)
+	Update-AdditionalDataPartitionsListView -State $State
+
+	if ($null -ne $State.Controls.txtStatus) {
+		$State.Controls.txtStatus.Text = "Partition layout restored to defaults."
+	}
+	WriteLog "ResetDiskLayoutToDefaults: Partition layout restored to defaults."
+	return $true
+}
+
 function Restore-RecoveryPartition {
     param(
         [Parameter(Mandatory = $true)]
@@ -1908,6 +1949,7 @@ function Invoke-RestoreDefaults {
         $State.Data.lastConfigFilePath = $null
 
         Initialize-UIDefaults -State $State
+		$null = Reset-DiskLayoutToDefaults -State $State
 
         WriteLog "RestoreDefaults: Completed."
         [System.Windows.MessageBox]::Show("Environment restored to defaults.", "Restore Defaults", "OK", "Information")

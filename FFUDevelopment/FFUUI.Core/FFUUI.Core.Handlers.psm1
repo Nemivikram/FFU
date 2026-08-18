@@ -1044,6 +1044,13 @@ function Register-EventHandlers {
             Clear-AdditionalDataPartitions -State $localState
         })
 
+	$State.Controls.btnResetDiskLayoutToDefaults.Add_Click({
+			param($eventSource, $routedEventArgs)
+			$window = [System.Windows.Window]::GetWindow($eventSource)
+			$localState = $window.Tag
+			$null = Reset-DiskLayoutToDefaults -State $localState -PromptForConfirmation
+		})
+
     $State.Controls.btnRestoreRecoveryPartition.Add_Click({
             param($eventSource, $routedEventArgs)
             $window = [System.Windows.Window]::GetWindow($eventSource)

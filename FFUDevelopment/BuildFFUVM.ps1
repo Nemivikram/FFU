@@ -3627,8 +3627,22 @@ function Set-VhdxBuildPartitionDriveLetters {
             })
     }
 
+    $resolvedAssignments = [System.Collections.Generic.List[pscustomobject]]::new()
+    $changedAssignments = [System.Collections.Generic.List[pscustomobject]]::new()
     foreach ($assignment in $assignments) {
         $requestedDriveLetter = ([string]$assignment.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+        $currentDriveLetter = ([string]$assignment.Partition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+        $resolvedAssignment = [pscustomobject]@{
+            Name                 = $assignment.Name
+            Partition            = $assignment.Partition
+            RequestedDriveLetter = $requestedDriveLetter
+            CurrentDriveLetter   = $currentDriveLetter
+        }
+        $resolvedAssignments.Add($resolvedAssignment)
+        if ($currentDriveLetter -ne $requestedDriveLetter) {
+            $changedAssignments.Add($resolvedAssignment)
+        }
+
         $existingPartitions = @(Get-Partition -DriveLetter $requestedDriveLetter -ErrorAction SilentlyContinue)
         $externalPartition = $existingPartitions | Where-Object { $_.DiskNumber -ne $Layout.Disk.Number } | Select-Object -First 1
         if ($null -ne $externalPartition) {
@@ -3643,21 +3657,28 @@ function Set-VhdxBuildPartitionDriveLetters {
         }
     }
 
-    # Remove target access paths first so swaps cannot collide with old VHDX assignments.
-    foreach ($assignment in $assignments) {
-        $currentDriveLetter = ([string]$assignment.Partition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
-        if ($currentDriveLetter -match '^[A-Z]$') {
-            WriteLog "Removing drive ${currentDriveLetter}: from $($assignment.Name) on working VHDX disk $($Layout.Disk.Number)."
-            Remove-PartitionAccessPath -DiskNumber $assignment.Partition.DiskNumber -PartitionNumber $assignment.Partition.PartitionNumber -AccessPath "${currentDriveLetter}:\" -ErrorAction Stop
+    if ($changedAssignments.Count -eq 0) {
+        WriteLog "Build partition drive letters already match the requested layout on working VHDX disk $($Layout.Disk.Number)."
+    }
+    else {
+        # Remove changed access paths first so swaps cannot collide with old VHDX assignments.
+        foreach ($assignment in $changedAssignments) {
+            if ($assignment.CurrentDriveLetter -match '^[A-Z]$') {
+                WriteLog "Removing drive $($assignment.CurrentDriveLetter): from $($assignment.Name) on working VHDX disk $($Layout.Disk.Number)."
+                Remove-PartitionAccessPath -DiskNumber $assignment.Partition.DiskNumber -PartitionNumber $assignment.Partition.PartitionNumber -AccessPath "$($assignment.CurrentDriveLetter):\" -ErrorAction Stop
+            }
+        }
+
+        foreach ($assignment in $changedAssignments) {
+            WriteLog "Assigning drive $($assignment.RequestedDriveLetter): to $($assignment.Name) on working VHDX disk $($Layout.Disk.Number)."
+            Set-Partition -DiskNumber $assignment.Partition.DiskNumber -PartitionNumber $assignment.Partition.PartitionNumber -NewDriveLetter $assignment.RequestedDriveLetter -ErrorAction Stop
         }
     }
 
-    foreach ($assignment in $assignments) {
-        $requestedDriveLetter = ([string]$assignment.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
-        WriteLog "Assigning drive ${requestedDriveLetter}: to $($assignment.Name) on working VHDX disk $($Layout.Disk.Number)."
-        Set-Partition -DiskNumber $assignment.Partition.DiskNumber -PartitionNumber $assignment.Partition.PartitionNumber -NewDriveLetter $requestedDriveLetter -ErrorAction Stop
+    foreach ($assignment in $resolvedAssignments) {
         $verifiedPartition = Get-Partition -DiskNumber $assignment.Partition.DiskNumber -PartitionNumber $assignment.Partition.PartitionNumber -ErrorAction Stop
-        if (([string]$verifiedPartition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant() -ne $requestedDriveLetter) {
+        $verifiedDriveLetter = ([string]$verifiedPartition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+        if ($verifiedDriveLetter -ne $assignment.RequestedDriveLetter) {
             throw "Drive letter verification failed for $($assignment.Name) on working VHDX disk $($Layout.Disk.Number)."
         }
     }

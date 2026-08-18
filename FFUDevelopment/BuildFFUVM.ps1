@@ -115,7 +115,7 @@ Optional fixed size of the Recovery partition in bytes. Leave as 0 to calculate 
 When set to $false, skips creating the Windows Recovery partition. Default is $true.
 
 .PARAMETER AdditionalDataPartitions
-Optional data partitions to create after the Recovery partition. Each item supports Name, Label, DriveLetter, SizeBytes or SizeGB, FillRemaining, and FileSystem.
+Optional data partitions to create after the Recovery partition. Each item supports Name, Label, DriveLetter, SizeBytes or SizeGB, FillRemaining, FileSystem, and PersistDriveLetter. The configured letter is always used in the build VM. On physical devices, persisted partitions keep that letter and other data partitions receive the next available letter from D through Z.
 
 .PARAMETER DriversFolder
 Path to the drivers folder. Default is $FFUDevelopmentPath\Drivers.
@@ -3675,6 +3675,8 @@ function New-FFUDataPartitionDriveLetterManifest {
         [string]$WindowsArch,
         [Parameter(Mandatory = $true)]
         [string]$ManifestPath,
+        [ValidateSet('BuildVm', 'Deployment')]
+        [string]$ManifestPurpose = 'Deployment',
         [bool]$Optimize = $false,
         [int]$OptimizeFFUPartitionNumber = 0
     )
@@ -3684,11 +3686,33 @@ function New-FFUDataPartitionDriveLetterManifest {
         $resizablePartitionNumber = Get-FFUOptimizePartitionNumber -Layout $Layout -RequestedPartitionNumber $OptimizeFFUPartitionNumber -AdditionalDataPartitions $AdditionalDataPartitions
     }
 
+    $reservedDeploymentDriveLetters = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($ManifestPurpose -eq 'Deployment') {
+        foreach ($dataPartitionConfig in $AdditionalDataPartitions) {
+            if ([bool]$dataPartitionConfig.PersistDriveLetter) {
+                $null = $reservedDeploymentDriveLetters.Add([string]$dataPartitionConfig.DriveLetter)
+            }
+        }
+    }
+
     $manifestPartitions = [System.Collections.Generic.List[pscustomobject]]::new()
     for ($dataPartitionIndex = 0; $dataPartitionIndex -lt $AdditionalDataPartitions.Count; $dataPartitionIndex++) {
         $dataPartitionConfig = $AdditionalDataPartitions[$dataPartitionIndex]
-        if (-not [bool]$dataPartitionConfig.PersistDriveLetter) {
-            continue
+        $assignmentMode = 'Configured'
+        $requestedDriveLetter = [string]$dataPartitionConfig.DriveLetter
+        if ($ManifestPurpose -eq 'Deployment' -and -not [bool]$dataPartitionConfig.PersistDriveLetter) {
+            $assignmentMode = 'Automatic'
+            $requestedDriveLetter = $null
+            foreach ($driveLetterCode in ([int][char]'D')..([int][char]'Z')) {
+                $candidateDriveLetter = [string][char]$driveLetterCode
+                if ($reservedDeploymentDriveLetters.Add($candidateDriveLetter)) {
+                    $requestedDriveLetter = $candidateDriveLetter
+                    break
+                }
+            }
+            if ([string]::IsNullOrWhiteSpace($requestedDriveLetter)) {
+                throw "No deployment drive letter is available for data partition '$($dataPartitionConfig.Name)'."
+            }
         }
 
         $resolvedDataPartition = $Layout.DataPartitions[$dataPartitionIndex]
@@ -3699,7 +3723,9 @@ function New-FFUDataPartitionDriveLetterManifest {
 
         $manifestPartitions.Add([pscustomobject][ordered]@{
                 Name                 = [string]$dataPartitionConfig.Name
-                RequestedDriveLetter = [string]$dataPartitionConfig.DriveLetter
+                RequestedDriveLetter = $requestedDriveLetter
+                ConfiguredDriveLetter = [string]$dataPartitionConfig.DriveLetter
+                AssignmentMode       = $assignmentMode
                 DataOrdinal          = $dataPartitionIndex + 1
                 PartitionNumber      = [int]$resolvedDataPartition.Partition.PartitionNumber
                 PartitionGuid        = $partitionGuid
@@ -3711,7 +3737,7 @@ function New-FFUDataPartitionDriveLetterManifest {
     }
 
     if ($manifestPartitions.Count -eq 0) {
-        throw 'Cannot create a data partition drive-letter manifest without opted-in partitions.'
+        throw 'Cannot create a data partition drive-letter manifest without data partitions.'
     }
 
     $manifestDirectory = Split-Path -Path $ManifestPath -Parent
@@ -3737,6 +3763,8 @@ function Add-FFUDataPartitionDriveLetterArtifacts {
         [object[]]$AdditionalDataPartitions,
         [Parameter(Mandatory = $true)]
         [string]$WindowsArch,
+        [ValidateSet('BuildVm', 'Deployment')]
+        [string]$ManifestPurpose = 'Deployment',
         [bool]$Optimize = $false,
         [int]$OptimizeFFUPartitionNumber = 0,
         [Parameter(Mandatory = $true)]
@@ -3753,7 +3781,7 @@ function Add-FFUDataPartitionDriveLetterArtifacts {
     $manifestPath = Join-Path -Path $runtimeDirectory -ChildPath 'Manifest.json'
     New-Item -Path $runtimeDirectory -ItemType Directory -Force | Out-Null
     Copy-Item -LiteralPath $runtimeSourcePath -Destination $runtimeScriptPath -Force
-    $null = New-FFUDataPartitionDriveLetterManifest -Layout $Layout -AdditionalDataPartitions $AdditionalDataPartitions -WindowsArch $WindowsArch -ManifestPath $manifestPath -Optimize $Optimize -OptimizeFFUPartitionNumber $OptimizeFFUPartitionNumber
+    $null = New-FFUDataPartitionDriveLetterManifest -Layout $Layout -AdditionalDataPartitions $AdditionalDataPartitions -WindowsArch $WindowsArch -ManifestPath $manifestPath -ManifestPurpose $ManifestPurpose -Optimize $Optimize -OptimizeFFUPartitionNumber $OptimizeFFUPartitionNumber
     Remove-Item -LiteralPath (Join-Path $runtimeDirectory 'Audit.success'), (Join-Path $runtimeDirectory 'Audit.failure'), (Join-Path $runtimeDirectory 'Specialize.failure') -Force -ErrorAction SilentlyContinue
 
     if (-not (Test-Path -LiteralPath $runtimeScriptPath -PathType Leaf) -or -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
@@ -6718,7 +6746,8 @@ Set-Progress -Percentage 2 -Message "Validating parameters..."
 #Set build partition drive letters and validate they are available for use; this is required before any build steps that require drive access to ensure the expected drive letters are reserved and to fail fast if there are conflicts.
 try {
     $normalizedAdditionalDataPartitions = @(ConvertTo-NormalizedDataPartitions -DataPartitions $AdditionalDataPartitions)
-    $persistDataPartitionDriveLetters = @($normalizedAdditionalDataPartitions | Where-Object { $_.PersistDriveLetter }).Count -gt 0
+    $configureDeployedDataPartitionDriveLetters = $normalizedAdditionalDataPartitions.Count -gt 0
+    $enforceBuildVmDataPartitionDriveLetters = $InstallApps -and $configureDeployedDataPartitionDriveLetters
     $fillRemainingPartitionCount = if ($OSPartitionSize -le 0) { 1 } else { 0 }
     $fillRemainingPartitionCount += @($normalizedAdditionalDataPartitions | Where-Object { $_.FillRemaining }).Count
     if ($fillRemainingPartitionCount -gt 1) {
@@ -8771,9 +8800,9 @@ if ($InstallApps) {
     $orchestrationBootstrapTargetFolder = "$($osPartitionDriveLetter):\Windows\Setup\Scripts"
     New-Item -Path $orchestrationBootstrapTargetFolder -ItemType Directory -Force | Out-Null
     Copy-Item -Path $orchestrationBootstrapSourcePath -Destination (Join-Path -Path $orchestrationBootstrapTargetFolder -ChildPath 'Start-FFUOrchestration.ps1') -Force | Out-Null
-    if ($persistDataPartitionDriveLetters) {
+    if ($enforceBuildVmDataPartitionDriveLetters) {
         $windowsPartitionRoot = "$($osPartitionDriveLetter):\"
-        $null = Add-FFUDataPartitionDriveLetterArtifacts -WindowsPartitionRoot $windowsPartitionRoot -Layout $partitionLayout -AdditionalDataPartitions $normalizedAdditionalDataPartitions -WindowsArch $WindowsArch -Optimize $Optimize -OptimizeFFUPartitionNumber $OptimizeFFUPartitionNumber -FFUDevelopmentPath $FFUDevelopmentPath
+        $null = Add-FFUDataPartitionDriveLetterArtifacts -WindowsPartitionRoot $windowsPartitionRoot -Layout $partitionLayout -AdditionalDataPartitions $normalizedAdditionalDataPartitions -WindowsArch $WindowsArch -ManifestPurpose BuildVm -Optimize $Optimize -OptimizeFFUPartitionNumber $OptimizeFFUPartitionNumber -FFUDevelopmentPath $FFUDevelopmentPath
     }
     if ($WindowsArch -eq 'x64') {
         Copy-Item -Path "$FFUDevelopmentPath\BuildFFUUnattend\unattend_x64.xml" -Destination "$($osPartitionDriveLetter):\Windows\Panther\Unattend\Unattend.xml" -Force | Out-Null
@@ -8785,14 +8814,14 @@ if ($InstallApps) {
     # Always dismount so downstream VM creation logic has a clean starting point
     Dismount-ScratchVhdx -VhdxPath $VHDXPath
 }
-elseif ($persistDataPartitionDriveLetters) {
+elseif ($configureDeployedDataPartitionDriveLetters) {
     $vhdMeta = Get-VHD -Path $VHDXPath
     if ($vhdMeta.Attached) {
         WriteLog 'VHDX already mounted; reusing existing mount for data partition drive-letter staging'
         $disk = Get-Disk -Number $vhdMeta.DiskNumber
     }
     else {
-        WriteLog 'Mounting VHDX to stage data partition drive-letter persistence'
+        WriteLog 'Mounting VHDX to stage data partition drive-letter assignment'
         $disk = Mount-VHD -Path $VHDXPath -Passthru | Get-Disk
     }
     $partitionLayout = Resolve-VhdxPartitionLayout -Disk $disk -CreateRecoveryPartition $CreateRecoveryPartition -AdditionalDataPartitions $normalizedAdditionalDataPartitions
@@ -8862,7 +8891,7 @@ try {
             WriteLog 'Waiting for VM to shutdown'
         } while ($FFUVM.State -ne 'Off')
         WriteLog 'VM Shutdown'
-        if ($persistDataPartitionDriveLetters) {
+        if ($enforceBuildVmDataPartitionDriveLetters) {
             $vhdMeta = Get-VHD -Path $VHDXPath
             if ($vhdMeta.Attached) {
                 WriteLog 'VHDX already mounted; reusing existing mount to validate data partition drive-letter audit results'
@@ -8881,6 +8910,7 @@ try {
             $runtimeDirectory = Join-Path -Path $windowsPartitionRoot -ChildPath 'Windows\Setup\Scripts\FFUDL'
             $runtimeScriptPath = Join-Path -Path $runtimeDirectory -ChildPath 'Apply.ps1'
             $manifestPath = Join-Path -Path $runtimeDirectory -ChildPath 'Manifest.json'
+            $null = Add-FFUDataPartitionDriveLetterArtifacts -WindowsPartitionRoot $windowsPartitionRoot -Layout $partitionLayout -AdditionalDataPartitions $normalizedAdditionalDataPartitions -WindowsArch $WindowsArch -Optimize $Optimize -OptimizeFFUPartitionNumber $OptimizeFFUPartitionNumber -FFUDevelopmentPath $FFUDevelopmentPath
             if (-not (Test-Path -LiteralPath $runtimeScriptPath -PathType Leaf) -or -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
                 throw "Data partition drive-letter runtime artifacts are missing from $runtimeDirectory after audit validation."
             }
@@ -8892,12 +8922,12 @@ try {
                 $stagedInjectedUnattendPath = Join-Path -Path $AppsPath -ChildPath 'Unattend\Unattend.xml'
                 if (Test-Path -LiteralPath $stagedInjectedUnattendPath -PathType Leaf) {
                     Copy-Item -LiteralPath $stagedInjectedUnattendPath -Destination $deploymentUnattendPath -Force
-                    WriteLog "Restored staged deployment unattend to $deploymentUnattendPath before adding data partition drive-letter persistence."
+                    WriteLog "Restored staged deployment unattend to $deploymentUnattendPath before adding data partition drive-letter assignment."
                 }
                 else {
                     $unattendSource = Get-UnattendSourcePath -UnattendFolder $UnattendFolder -WindowsArch $WindowsArch -UnattendX64FilePath $UnattendX64FilePath -UnattendArm64FilePath $UnattendArm64FilePath
                     Save-StagedUnattendFile -SourcePath $unattendSource -DestinationPath $deploymentUnattendPath -DeviceNamingMode $DeviceNamingMode -DeviceNameTemplate $normalizedDeviceNameTemplate -WindowsArch $WindowsArch
-                    WriteLog "Restaged deployment unattend to $deploymentUnattendPath before adding data partition drive-letter persistence."
+                    WriteLog "Restaged deployment unattend to $deploymentUnattendPath before adding data partition drive-letter assignment."
                 }
             }
             Add-FFUDataPartitionDriveLetterCommandToUnattend -UnattendPath $deploymentUnattendPath -ProcessorArchitecture $WindowsArch

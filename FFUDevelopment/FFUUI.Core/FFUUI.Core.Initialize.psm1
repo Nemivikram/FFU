@@ -903,7 +903,7 @@ function Initialize-DynamicUIElements {
     $persistDriveLetterGridFactory = New-Object System.Windows.FrameworkElementFactory([System.Windows.Controls.Grid])
     $persistDriveLetterGridFactory.SetValue([System.Windows.FrameworkElement]::HorizontalAlignmentProperty, [System.Windows.HorizontalAlignment]::Stretch)
     $persistDriveLetterFactory = New-Object System.Windows.FrameworkElementFactory([System.Windows.Controls.CheckBox])
-    $persistDriveLetterFactory.SetValue([System.Windows.Controls.Control]::ToolTipProperty, 'Keep this drive letter in the build VM and on devices deployed with FFU Builder.')
+    $persistDriveLetterFactory.SetValue([System.Windows.Controls.Control]::ToolTipProperty, 'Use the configured letter on physical devices. If cleared, deployed Windows assigns the next available letter from D: upward. The build VM always uses the configured letter. FFU deployment USB letters may be shifted.')
     $persistDriveLetterFactory.SetValue([System.Windows.FrameworkElement]::HorizontalAlignmentProperty, [System.Windows.HorizontalAlignment]::Center)
     $persistDriveLetterFactory.SetValue([System.Windows.FrameworkElement]::VerticalAlignmentProperty, [System.Windows.VerticalAlignment]::Center)
     $persistDriveLetterBinding = New-Object System.Windows.Data.Binding("PersistDriveLetter")

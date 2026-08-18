@@ -381,7 +381,7 @@
                                                 <TextBlock Grid.Row="0" Grid.Column="4" Text="Persist Drive Letter" Margin="0,0,8,8"/>
                                                 <TextBlock Grid.Row="0" Grid.Column="5" Text=" " Margin="0,0,0,8"/>
                                                 <TextBox x:Name="txtDataPartitionName" Grid.Row="1" Grid.Column="0" Margin="0,0,8,0" ToolTip="Name and volume label for the data partition."/>
-                                                <ComboBox x:Name="cmbDataPartitionDriveLetter" Grid.Row="1" Grid.Column="1" Margin="0,0,8,0" ToolTip="Build-time drive letter for the data partition.">
+                                                <ComboBox x:Name="cmbDataPartitionDriveLetter" Grid.Row="1" Grid.Column="1" Margin="0,0,8,0" ToolTip="Configured data-partition drive letter. The build VM always uses it; physical devices use it when Persist Drive Letter is selected.">
                                                     <ComboBoxItem Content="D" IsSelected="True"/>
                                                     <ComboBoxItem Content="E"/>
                                                     <ComboBoxItem Content="F"/>
@@ -408,7 +408,7 @@
                                                 </ComboBox>
                                                 <TextBox x:Name="txtDataPartitionSizeGB" Grid.Row="1" Grid.Column="2" Margin="0,0,8,0" ToolTip="Data partition size in GB. Leave blank only when Fill Remaining is selected."/>
                                                 <CheckBox x:Name="chkDataPartitionFillRemaining" Grid.Row="1" Grid.Column="3" Margin="0,0,8,0" VerticalAlignment="Center" ToolTip="Use the remaining VHDX space for this data partition. Only one data partition can fill remaining space."/>
-                                                <CheckBox x:Name="chkDataPartitionPersistDriveLetter" Grid.Row="1" Grid.Column="4" Margin="0,0,8,0" VerticalAlignment="Center" ToolTip="Keep this drive letter in the build VM and on devices deployed with FFU Builder."/>
+                                                <CheckBox x:Name="chkDataPartitionPersistDriveLetter" Grid.Row="1" Grid.Column="4" Margin="0,0,8,0" VerticalAlignment="Center" ToolTip="Use the configured letter on physical devices. If cleared, deployed Windows assigns the next available letter from D: upward. The build VM always uses the configured letter. FFU deployment USB letters may be shifted."/>
                                                 <Button x:Name="btnAddDataPartition" Grid.Row="1" Grid.Column="5" Content="Add Data Partition" Width="160" ToolTip="Add the configured data partition to the build configuration."/>
                                             </Grid>
 

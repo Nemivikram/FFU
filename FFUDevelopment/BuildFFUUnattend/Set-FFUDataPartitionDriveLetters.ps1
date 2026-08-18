@@ -99,6 +99,61 @@ function Resolve-FFUDataPartition {
 	}
 }
 
+function Get-FFUDataPartitionAssignmentMode {
+	param(
+		[Parameter(Mandatory = $true)]
+		[object]$ManifestEntry
+	)
+
+	$assignmentMode = 'Configured'
+	if ($ManifestEntry.PSObject.Properties.Name -contains 'AssignmentMode') {
+		$assignmentMode = ([string]$ManifestEntry.AssignmentMode).Trim()
+	}
+	if ($assignmentMode -notin @('Configured', 'Automatic')) {
+		throw "Partition '$($ManifestEntry.Name)' uses unsupported assignment mode '$assignmentMode'."
+	}
+
+	return $assignmentMode
+}
+
+function Get-FFUDeploymentMediaDiskNumbers {
+	$deploymentMediaDiskNumbers = [System.Collections.Generic.HashSet[int]]::new()
+	$deploymentVolumes = @(Get-Volume -ErrorAction SilentlyContinue | Where-Object { ([string]$_.FileSystemLabel).Trim() -ieq 'Deploy' })
+	foreach ($deploymentVolume in $deploymentVolumes) {
+		$driveLetter = ([string]$deploymentVolume.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+		if ($driveLetter -notmatch '^[A-Z]$') {
+			continue
+		}
+
+		$deploymentPartitions = @(Get-Partition -DriveLetter $driveLetter -ErrorAction SilentlyContinue)
+		foreach ($deploymentPartition in $deploymentPartitions) {
+			$deploymentDisk = Get-Disk -Number $deploymentPartition.DiskNumber -ErrorAction SilentlyContinue
+			if ($null -ne $deploymentDisk -and (([string]$deploymentDisk.BusType -ieq 'USB') -or ([string]$deploymentVolume.DriveType -ieq 'Removable'))) {
+				$null = $deploymentMediaDiskNumbers.Add([int]$deploymentPartition.DiskNumber)
+			}
+		}
+	}
+
+	return @($deploymentMediaDiskNumbers | Sort-Object)
+}
+
+function Get-FFUNextAvailableDriveLetter {
+	param(
+		[Parameter(Mandatory = $true)]
+		[AllowEmptyCollection()]
+		[System.Collections.Generic.HashSet[string]]$ReservedDriveLetters
+	)
+
+	foreach ($driveLetterCode in ([int][char]'D')..([int][char]'Z')) {
+		$candidateDriveLetter = [string][char]$driveLetterCode
+		if ($ReservedDriveLetters.Add($candidateDriveLetter)) {
+			return $candidateDriveLetter
+		}
+	}
+
+	throw 'No drive letter from D through Z is available.'
+}
+
 function Set-FFUDataPartitionDriveLetters {
 	param(
 		[Parameter(Mandatory = $true)]
@@ -121,37 +176,175 @@ function Set-FFUDataPartitionDriveLetters {
 		Sort-Object -Property PartitionNumber)
 
 	$resolvedEntries = [System.Collections.Generic.List[pscustomobject]]::new()
+	$targetPartitionKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 	foreach ($manifestEntry in @($Manifest.Partitions)) {
 		$requestedDriveLetter = ([string]$manifestEntry.RequestedDriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
 		if ($requestedDriveLetter -notmatch '^[D-Z]$') {
 			throw "Partition '$($manifestEntry.Name)' requests invalid drive letter '$requestedDriveLetter'."
 		}
-		$manifestEntry.RequestedDriveLetter = $requestedDriveLetter
-		$resolvedEntries.Add((Resolve-FFUDataPartition -ManifestEntry $manifestEntry -DataPartitions $dataPartitions))
+
+		$resolvedPartition = Resolve-FFUDataPartition -ManifestEntry $manifestEntry -DataPartitions $dataPartitions
+		$assignmentMode = Get-FFUDataPartitionAssignmentMode -ManifestEntry $manifestEntry
+		$targetPartitionKey = "$($resolvedPartition.Partition.DiskNumber):$($resolvedPartition.Partition.PartitionNumber)"
+		if (-not $targetPartitionKeys.Add($targetPartitionKey)) {
+			throw "Partition '$($manifestEntry.Name)' resolves to a data partition already targeted by another manifest entry."
+		}
+		$resolvedEntries.Add([pscustomobject]@{
+				ManifestEntry       = $resolvedPartition.ManifestEntry
+				Partition           = $resolvedPartition.Partition
+				Volume              = $resolvedPartition.Volume
+				AssignmentMode      = $assignmentMode
+				RequestedDriveLetter = $requestedDriveLetter
+			})
+	}
+
+	$deploymentMediaDiskNumbers = @(Get-FFUDeploymentMediaDiskNumbers)
+	$deploymentMediaDiskNumberSet = [System.Collections.Generic.HashSet[int]]::new()
+	foreach ($deploymentMediaDiskNumber in $deploymentMediaDiskNumbers) {
+		$null = $deploymentMediaDiskNumberSet.Add([int]$deploymentMediaDiskNumber)
+	}
+
+	$reservedDriveLetters = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+	foreach ($resolvedEntry in $resolvedEntries) {
+		if ($resolvedEntry.AssignmentMode -eq 'Configured') {
+			$null = $reservedDriveLetters.Add([string]$resolvedEntry.RequestedDriveLetter)
+		}
+	}
+
+	foreach ($driveLetterCode in ([int][char]'D')..([int][char]'Z')) {
+		$driveLetter = [string][char]$driveLetterCode
+		$letterOwners = @(Get-Partition -DriveLetter $driveLetter -ErrorAction SilentlyContinue)
+		$hasProtectedOwner = $false
+		foreach ($letterOwner in $letterOwners) {
+			$ownerKey = "$($letterOwner.DiskNumber):$($letterOwner.PartitionNumber)"
+			if (-not $targetPartitionKeys.Contains($ownerKey) -and -not $deploymentMediaDiskNumberSet.Contains([int]$letterOwner.DiskNumber)) {
+				$hasProtectedOwner = $true
+				break
+			}
+		}
+
+		if ($hasProtectedOwner -or ($letterOwners.Count -eq 0 -and $null -ne (Get-PSDrive -Name $driveLetter -PSProvider FileSystem -ErrorAction SilentlyContinue))) {
+			$null = $reservedDriveLetters.Add($driveLetter)
+		}
 	}
 
 	foreach ($resolvedEntry in $resolvedEntries) {
-		$requestedDriveLetter = [string]$resolvedEntry.ManifestEntry.RequestedDriveLetter
+		if ($resolvedEntry.AssignmentMode -ne 'Automatic') {
+			continue
+		}
+
+		$resolvedEntry.RequestedDriveLetter = Get-FFUNextAvailableDriveLetter -ReservedDriveLetters $reservedDriveLetters
+		Write-FFUDataPartitionDriveLetterLog "Selected next available drive $($resolvedEntry.RequestedDriveLetter): for '$($resolvedEntry.ManifestEntry.Name)'."
+	}
+
+	$requestedDriveLetters = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+	foreach ($resolvedEntry in $resolvedEntries) {
+		if (-not $requestedDriveLetters.Add([string]$resolvedEntry.RequestedDriveLetter)) {
+			throw "Drive letter $($resolvedEntry.RequestedDriveLetter): is requested by more than one data partition."
+		}
+	}
+
+	$deploymentMediaDisksToRelocate = [System.Collections.Generic.HashSet[int]]::new()
+	foreach ($resolvedEntry in $resolvedEntries) {
+		$requestedDriveLetter = [string]$resolvedEntry.RequestedDriveLetter
 		$currentDriveLetter = ([string]$resolvedEntry.Partition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
 		if ($currentDriveLetter -eq $requestedDriveLetter) {
 			continue
 		}
 
-		$requestedVolumes = @(Get-Volume -DriveLetter $requestedDriveLetter -ErrorAction SilentlyContinue)
-		if ($requestedVolumes.Count -gt 0) {
-			$requestedOwner = @(Get-Partition -DriveLetter $requestedDriveLetter -ErrorAction SilentlyContinue | Select-Object -First 1)
-			$ownerDescription = if ($requestedOwner.Count -gt 0) {
-				"disk $($requestedOwner[0].DiskNumber), partition $($requestedOwner[0].PartitionNumber)"
+		$requestedOwners = @(Get-Partition -DriveLetter $requestedDriveLetter -ErrorAction SilentlyContinue)
+		foreach ($requestedOwner in $requestedOwners) {
+			$ownerKey = "$($requestedOwner.DiskNumber):$($requestedOwner.PartitionNumber)"
+			if ($targetPartitionKeys.Contains($ownerKey)) {
+				continue
+			}
+			if ($deploymentMediaDiskNumberSet.Contains([int]$requestedOwner.DiskNumber)) {
+				$null = $deploymentMediaDisksToRelocate.Add([int]$requestedOwner.DiskNumber)
+				continue
+			}
+
+			$requestedVolume = @($requestedOwner | Get-Volume -ErrorAction SilentlyContinue | Select-Object -First 1)
+			$ownerDescription = if ($requestedVolume.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$requestedVolume[0].FileSystemLabel)) {
+				"volume '$($requestedVolume[0].FileSystemLabel)' on disk $($requestedOwner.DiskNumber), partition $($requestedOwner.PartitionNumber)"
 			}
 			else {
-				"volume '$($requestedVolumes[0].FileSystemLabel)'"
+				"disk $($requestedOwner.DiskNumber), partition $($requestedOwner.PartitionNumber)"
 			}
 			throw "Cannot assign drive ${requestedDriveLetter}: to partition '$($resolvedEntry.ManifestEntry.Name)' because the letter is owned by $ownerDescription."
 		}
+
+		if ($requestedOwners.Count -eq 0) {
+			$existingFileSystemDrive = Get-PSDrive -Name $requestedDriveLetter -PSProvider FileSystem -ErrorAction SilentlyContinue
+			if ($null -ne $existingFileSystemDrive) {
+				throw "Cannot assign drive ${requestedDriveLetter}: to partition '$($resolvedEntry.ManifestEntry.Name)' because it is mapped to '$($existingFileSystemDrive.Root)'."
+			}
+		}
+	}
+
+	$deploymentMediaPartitionsToRelocate = [System.Collections.Generic.List[pscustomobject]]::new()
+	foreach ($deploymentMediaDiskNumber in @($deploymentMediaDisksToRelocate | Sort-Object)) {
+		$deploymentMediaPartitions = @(Get-Partition -DiskNumber $deploymentMediaDiskNumber -ErrorAction Stop | Sort-Object -Property PartitionNumber)
+		foreach ($deploymentMediaPartition in $deploymentMediaPartitions) {
+			$currentDriveLetter = ([string]$deploymentMediaPartition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+			if ($currentDriveLetter -notmatch '^[D-Z]$') {
+				continue
+			}
+
+			$deploymentMediaVolume = @($deploymentMediaPartition | Get-Volume -ErrorAction SilentlyContinue | Select-Object -First 1)
+			$volumeLabel = if ($deploymentMediaVolume.Count -gt 0) { [string]$deploymentMediaVolume[0].FileSystemLabel } else { '' }
+			$deploymentMediaPartitionsToRelocate.Add([pscustomobject]@{
+					Partition   = $deploymentMediaPartition
+					DriveLetter = $currentDriveLetter
+					VolumeLabel = $volumeLabel
+				})
+		}
+	}
+
+	$finalReservedDriveLetters = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+	foreach ($driveLetterCode in ([int][char]'D')..([int][char]'Z')) {
+		$driveLetter = [string][char]$driveLetterCode
+		$letterOwners = @(Get-Partition -DriveLetter $driveLetter -ErrorAction SilentlyContinue)
+		$hasRemainingOwner = $false
+		foreach ($letterOwner in $letterOwners) {
+			$ownerKey = "$($letterOwner.DiskNumber):$($letterOwner.PartitionNumber)"
+			if (-not $targetPartitionKeys.Contains($ownerKey) -and -not $deploymentMediaDisksToRelocate.Contains([int]$letterOwner.DiskNumber)) {
+				$hasRemainingOwner = $true
+				break
+			}
+		}
+
+		if ($hasRemainingOwner -or ($letterOwners.Count -eq 0 -and $null -ne (Get-PSDrive -Name $driveLetter -PSProvider FileSystem -ErrorAction SilentlyContinue))) {
+			$null = $finalReservedDriveLetters.Add($driveLetter)
+		}
+	}
+	foreach ($resolvedEntry in $resolvedEntries) {
+		$null = $finalReservedDriveLetters.Add([string]$resolvedEntry.RequestedDriveLetter)
+	}
+	$availableMediaDriveLetterCount = 0
+	foreach ($driveLetterCode in ([int][char]'D')..([int][char]'Z')) {
+		if (-not $finalReservedDriveLetters.Contains([string][char]$driveLetterCode)) {
+			$availableMediaDriveLetterCount++
+		}
+	}
+	if ($availableMediaDriveLetterCount -lt $deploymentMediaPartitionsToRelocate.Count) {
+		throw 'There are not enough available drive letters to relocate the FFU deployment media.'
+	}
+
+	# Remove affected access paths first so internal and deployment-media letters can be reordered safely.
+	foreach ($resolvedEntry in $resolvedEntries) {
+		$currentDriveLetter = ([string]$resolvedEntry.Partition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+		if ($currentDriveLetter -match '^[D-Z]$' -and $currentDriveLetter -ne [string]$resolvedEntry.RequestedDriveLetter) {
+			Write-FFUDataPartitionDriveLetterLog "Removing drive ${currentDriveLetter}: from '$($resolvedEntry.ManifestEntry.Name)' before reassignment."
+			Remove-PartitionAccessPath -DiskNumber $resolvedEntry.Partition.DiskNumber -PartitionNumber $resolvedEntry.Partition.PartitionNumber -AccessPath "${currentDriveLetter}:\" -ErrorAction Stop
+		}
+	}
+	foreach ($deploymentMediaEntry in $deploymentMediaPartitionsToRelocate) {
+		Write-FFUDataPartitionDriveLetterLog "Removing drive $($deploymentMediaEntry.DriveLetter): from FFU deployment media '$($deploymentMediaEntry.VolumeLabel)' before reassignment."
+		Remove-PartitionAccessPath -DiskNumber $deploymentMediaEntry.Partition.DiskNumber -PartitionNumber $deploymentMediaEntry.Partition.PartitionNumber -AccessPath "$($deploymentMediaEntry.DriveLetter):\" -ErrorAction Stop
 	}
 
 	foreach ($resolvedEntry in $resolvedEntries) {
-		$requestedDriveLetter = [string]$resolvedEntry.ManifestEntry.RequestedDriveLetter
+		$requestedDriveLetter = [string]$resolvedEntry.RequestedDriveLetter
 		$currentDriveLetter = ([string]$resolvedEntry.Partition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
 		if ($currentDriveLetter -ne $requestedDriveLetter) {
 			$currentDriveLetterText = if ([string]::IsNullOrWhiteSpace($currentDriveLetter)) { 'no drive letter' } else { "drive ${currentDriveLetter}:" }
@@ -164,6 +357,24 @@ function Set-FFUDataPartitionDriveLetters {
 			throw "Drive letter verification failed for partition '$($resolvedEntry.ManifestEntry.Name)'."
 		}
 		Write-FFUDataPartitionDriveLetterLog "Verified '$($resolvedEntry.ManifestEntry.Name)' at drive ${requestedDriveLetter}:."
+	}
+
+	$mediaReservedDriveLetters = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+	foreach ($driveLetterCode in ([int][char]'D')..([int][char]'Z')) {
+		$driveLetter = [string][char]$driveLetterCode
+		$letterOwners = @(Get-Partition -DriveLetter $driveLetter -ErrorAction SilentlyContinue)
+		if ($letterOwners.Count -gt 0 -or $null -ne (Get-PSDrive -Name $driveLetter -PSProvider FileSystem -ErrorAction SilentlyContinue)) {
+			$null = $mediaReservedDriveLetters.Add($driveLetter)
+		}
+	}
+	foreach ($deploymentMediaEntry in $deploymentMediaPartitionsToRelocate) {
+		$newDriveLetter = Get-FFUNextAvailableDriveLetter -ReservedDriveLetters $mediaReservedDriveLetters
+		Write-FFUDataPartitionDriveLetterLog "Assigning drive ${newDriveLetter}: to FFU deployment media '$($deploymentMediaEntry.VolumeLabel)'."
+		Set-Partition -DiskNumber $deploymentMediaEntry.Partition.DiskNumber -PartitionNumber $deploymentMediaEntry.Partition.PartitionNumber -NewDriveLetter $newDriveLetter -ErrorAction Stop
+		$verifiedMediaPartition = Get-Partition -DiskNumber $deploymentMediaEntry.Partition.DiskNumber -PartitionNumber $deploymentMediaEntry.Partition.PartitionNumber -ErrorAction Stop
+		if (([string]$verifiedMediaPartition.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant() -ne $newDriveLetter) {
+			throw "Drive letter verification failed for FFU deployment media '$($deploymentMediaEntry.VolumeLabel)'."
+		}
 	}
 }
 

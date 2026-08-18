@@ -165,7 +165,7 @@ function Get-FFUDataPartitionDriveLetterDeploymentContext {
         throw "Unsupported data partition drive-letter processor architecture '$processorArchitecture'."
     }
 
-    WriteLog "Found data partition drive-letter persistence manifest with $(@($manifest.Partitions).Count) partition(s)."
+    WriteLog "Found data partition drive-letter assignment manifest with $(@($manifest.Partitions).Count) partition(s)."
     return [pscustomobject]@{
         RuntimeDirectory      = $runtimeDirectory
         RuntimeScriptPath     = $runtimeScriptPath
@@ -1943,7 +1943,7 @@ if ($null -ne $dataPartitionDriveLetterDeploymentContext) {
     $deploymentUnattendPath = 'W:\Windows\Panther\Unattend.xml'
     try {
         if ($Unattend) {
-            WriteLog "Merging data partition drive-letter persistence into custom unattend at $deploymentUnattendPath."
+            WriteLog "Merging data partition drive-letter assignment into custom unattend at $deploymentUnattendPath."
             Add-FFUDataPartitionDriveLetterCommandToAppliedUnattend -UnattendPath $deploymentUnattendPath -ProcessorArchitecture $dataPartitionDriveLetterDeploymentContext.ProcessorArchitecture
         }
         else {

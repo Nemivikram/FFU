@@ -19,7 +19,7 @@ This table lists all top-level parameters in BuildFFUVM.ps1.
 | Parameter | Type | UI Control | Description |
 | --- | --- | --- | --- |
 | -AdditionalFFUFiles | string[] | Copy Additional FFU Files + Additional FFU Files list | Array of full file paths to existing FFU files that should also be copied to the deployment USB when -CopyAdditionalFFUFiles is set to $true. |
-| -AdditionalDataPartitions | object[] | Disk Layout | Creates optional data partitions after the base Windows layout. Recovery normally remains before data partitions unless -CreateRecoveryPartition is $false. Each item supports Name, Label, DriveLetter, SizeBytes or SizeGB, FillRemaining, FileSystem, and PersistDriveLetter. DriveLetter must be D through Z, only one item can use FillRemaining, and PersistDriveLetter defaults to $false. |
+| -AdditionalDataPartitions | object[] | Disk Layout | Creates optional data partitions after the base Windows layout. Recovery normally remains before data partitions unless -CreateRecoveryPartition is $false. Each item supports Name, Label, DriveLetter, SizeBytes or SizeGB, FillRemaining, FileSystem, and PersistDriveLetter. DriveLetter must be D through Z and is always used in an application build VM. Only one item can use FillRemaining. PersistDriveLetter defaults to $false; unchecked partitions receive the next available physical-device letter from D upward. |
 | -AllowExternalHardDiskMedia | bool | Allow External Hard Disk Media | When set to $true, will allow the use of media identified as External Hard Disk media via WMI class Win32_DiskDrive. Default is not defined. |
 | -AllowVHDXCaching | bool | Allow VHDX Caching | When set to $true, will cache the VHDX file to the $FFUDevelopmentPath\VHDXCache folder and create a config json file that will keep track of the Windows build information, the updates installed, and the logical sector byte size information. Default is $false. |
 | -AppListPath | string | AppList.json Path | Path to a JSON file containing a list of applications to install using WinGet. Default is $FFUDevelopmentPath\Apps\AppList.json. |
@@ -120,12 +120,12 @@ Each item supports the following fields:
 | --- | --- | --- |
 | `Name` | Yes | Partition name used in configuration and logs. |
 | `Label` | No | Volume label. Defaults to `Name`. |
-| `DriveLetter` | Yes | Build letter from `D` through `Z`, without a colon. It must be unique across the complete build layout. |
+| `DriveLetter` | Yes | Configured letter from `D` through `Z`, without a colon. It must be unique across the complete build layout and is always used in an application build VM. It is required on a physical device only when `PersistDriveLetter` is `$true`. |
 | `SizeBytes` or `SizeGB` | Conditional | Fixed partition size. Omit only when `FillRemaining` is `$true`. |
 | `FillRemaining` | No | Uses the remaining VHDX space. Default is `$false`; only one data partition can enable it. |
 | `FileSystem` | No | `NTFS` or `ReFS`. Default is `NTFS`. |
-| `PersistDriveLetter` | No | When `$true`, requires the selected data letter in the build VM and deployed Windows. Default is `$false`. Any occupied-letter conflict stops the build or deployment. |
+| `PersistDriveLetter` | No | When `$true`, requires the configured data letter in deployed Windows. When `$false`, assigns the next available letter from `D` upward. Default is `$false`. The build VM uses the configured letter regardless of this value. Recognized FFU deployment USB letters may be shifted; unrelated occupied letters remain protected. |
 
-`PersistDriveLetter` does not change VHDX cache compatibility. It controls per-build runtime artifacts that are added only to the working VHDX after the reusable base has been cached or copied.
+`PersistDriveLetter` does not change VHDX cache compatibility. For application builds, temporary runtime artifacts enforce every configured data letter in the build VM after the reusable base has been cached or copied. Before capture, FFU Builder replaces the build-VM manifest with a physical-device manifest for every data partition. Builds without applications stage the physical-device manifest directly when data partitions exist.
 
 {% include page_nav.html %}

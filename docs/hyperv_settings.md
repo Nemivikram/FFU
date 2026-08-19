@@ -57,6 +57,8 @@ The Recovery partition can be removed by selecting its row checkbox and using **
 
 Each data partition has a name, a drive letter from `D:` through `Z:`, and either a size in GB or **Fill Remaining**. When FFU Builder installs applications in a build VM, the partition uses this configured letter before any application scripts run. Only one Windows or data partition can use **Fill Remaining**. Data partitions can be reordered with the arrow buttons. **Clear** removes only data partitions, not the base partition rows.
 
+When you provide a Windows ISO, Windows temporarily assigns the mounted ISO a host drive letter. If that letter is configured for a build partition, FFU Builder moves only the Windows ISO to another unused letter before creating the VHDX partitions. An ISO that does not conflict keeps its original mounted letter.
+
 Use **Reset to Default** to restore the System, MSR, Windows, and Recovery rows and remove all additional data partitions. The reset restores the default `S:`, `W:`, and `R:` build letters, makes Windows use **Fill Remaining**, and returns Recovery to automatic sizing. It does not change **Disk Size** or **Logical Sector Size**.
 
 **Persist Drive Letter** is off by default and controls whether the configured letter is also required on a physical device. The build VM uses the configured letter whether or not this option is selected. When selected, FFU Builder requires the same letter when a deployed device enters the Windows `specialize` pass. When cleared, the partition receives the lowest available letter from `D:` upward in data-partition order.

@@ -2821,22 +2821,101 @@ function Test-AppsIsoRefreshRequired {
 
     return $false
 }
+function Dismount-WindowsIsoSource {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ImagePath
+    )
+
+    $diskImage = Get-DiskImage -ImagePath $ImagePath -ErrorAction SilentlyContinue
+    if ($null -eq $diskImage -or -not $diskImage.Attached) {
+        return
+    }
+
+    WriteLog 'Dismounting Windows ISO'
+    Dismount-DiskImage -ImagePath $ImagePath -ErrorAction Stop | Out-Null
+    WriteLog 'Done'
+}
 function Get-WimFromISO {
-    #Mount ISO, get Wim file
-    $mountResult = Mount-DiskImage -ImagePath $isoPath -PassThru
-    $sourcesFolder = ($mountResult | Get-Volume).DriveLetter + ":\sources\"
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ImagePath,
 
-    # Check for install.wim or install.esd
-    $wimPath = (Get-ChildItem $sourcesFolder\install.* | Where-Object { $_.Name -match "install\.(wim|esd)" }).FullName
+        [string[]]$ExcludedDriveLetters = @()
+    )
 
-    if ($wimPath) {
-        WriteLog "The path to the install file is: $wimPath"
+    $existingDiskImage = Get-DiskImage -ImagePath $ImagePath -ErrorAction Stop
+    if ($existingDiskImage.Attached) {
+        throw "Windows ISO '$ImagePath' is already mounted. Dismount it before starting the build."
     }
-    else {
-        WriteLog "No install.wim or install.esd file found in: $sourcesFolder"
-    }
 
-    return $wimPath
+    $mountedByBuild = $false
+    try {
+        $mountResult = Mount-DiskImage -ImagePath $ImagePath -PassThru -ErrorAction Stop
+        $mountedByBuild = $true
+        $mountedVolumes = @($mountResult | Get-Volume -ErrorAction Stop)
+        if ($mountedVolumes.Count -ne 1) {
+            throw "Expected one mounted volume for Windows ISO '$ImagePath', found $($mountedVolumes.Count)."
+        }
+
+        $mountedVolume = $mountedVolumes[0]
+        $isoDriveLetter = ([string]$mountedVolume.DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+        if ($isoDriveLetter -notmatch '^[A-Z]$') {
+            throw "Windows ISO '$ImagePath' was mounted without a usable drive letter."
+        }
+
+        $normalizedExcludedDriveLetters = @($ExcludedDriveLetters | ForEach-Object {
+                ([string]$_).Trim().TrimEnd(':').ToUpperInvariant()
+            } | Where-Object { $_ -match '^[A-Z]$' } | Select-Object -Unique)
+        if ($normalizedExcludedDriveLetters -contains $isoDriveLetter) {
+            $replacementDriveLetter = Get-AvailableDriveLetter -ExcludedDriveLetters $normalizedExcludedDriveLetters
+            if ($null -eq $replacementDriveLetter) {
+                throw 'No drive letter is available for the mounted Windows ISO outside the configured build partition letters.'
+            }
+
+            $isoVolume = Get-CimInstance -ClassName Win32_Volume -Filter "DriveLetter = '${isoDriveLetter}:' AND DriveType = 5" -ErrorAction Stop
+            if ($null -eq $isoVolume) {
+                throw "Unable to resolve the mounted Windows ISO volume at ${isoDriveLetter}:."
+            }
+
+            WriteLog "Windows ISO drive ${isoDriveLetter}: conflicts with the configured build partition layout. Moving it to ${replacementDriveLetter}:."
+            Set-CimInstance -InputObject $isoVolume -Property @{ DriveLetter = "${replacementDriveLetter}:" } -ErrorAction Stop | Out-Null
+
+            $mountedVolumes = @($mountResult | Get-Volume -ErrorAction Stop)
+            $verifiedDriveLetter = if ($mountedVolumes.Count -eq 1) {
+                ([string]$mountedVolumes[0].DriveLetter).Trim().TrimEnd(':').ToUpperInvariant()
+            }
+            if ($verifiedDriveLetter -ne $replacementDriveLetter) {
+                throw "Windows ISO drive-letter verification failed after assigning ${replacementDriveLetter}:."
+            }
+            $isoDriveLetter = $verifiedDriveLetter
+        }
+
+        $sourcesFolder = "${isoDriveLetter}:\sources"
+        $windowsImage = Get-ChildItem -LiteralPath $sourcesFolder -Filter 'install.*' -File -ErrorAction Stop | Where-Object {
+            $_.Name -match '^install\.(wim|esd)$'
+        } | Select-Object -First 1
+        if ($null -eq $windowsImage) {
+            throw "No install.wim or install.esd file was found in '$sourcesFolder'."
+        }
+
+        WriteLog "The path to the install file is: $($windowsImage.FullName)"
+        return $windowsImage.FullName
+    }
+    catch {
+        $mountError = $_
+        if ($mountedByBuild) {
+            try {
+                Dismount-WindowsIsoSource -ImagePath $ImagePath
+            }
+            catch {
+                WriteLog "Failed to dismount Windows ISO after a mount error: $($_.Exception.Message)"
+            }
+        }
+        throw $mountError
+    }
 }
 
 function Get-ResolvedWindowsSKUFromImage {
@@ -4225,11 +4304,18 @@ function Get-PrivateProfileSection {
 }
     
 function Get-AvailableDriveLetter {
-    # Get an unused drive letter for temporary SUBST mappings
-    $usedLetters = (Get-PSDrive -PSProvider FileSystem).Name | ForEach-Object { $_.ToUpperInvariant() }
+    param(
+        [string[]]$ExcludedDriveLetters = @()
+    )
+
+    # Get an unused drive letter for temporary ISO and SUBST mappings.
+    $usedLetters = @((Get-PSDrive -PSProvider FileSystem).Name | ForEach-Object { $_.ToUpperInvariant() })
+    $excludedLetters = @($ExcludedDriveLetters | ForEach-Object {
+            ([string]$_).Trim().TrimEnd(':').ToUpperInvariant()
+        } | Where-Object { $_ -match '^[A-Z]$' } | Select-Object -Unique)
     for ($ascii = [int][char]'Z'; $ascii -ge [int][char]'A'; $ascii--) {
-        $candidate = [char]$ascii
-        if ($usedLetters -notcontains $candidate) {
+        $candidate = [string][char]$ascii
+        if ($usedLetters -notcontains $candidate -and $excludedLetters -notcontains $candidate) {
             return $candidate
         }
     }
@@ -7884,6 +7970,7 @@ if ($InstallApps) {
 }
 
 #Create VHDX
+$windowsIsoMountedByBuild = $false
 try {
     Set-Progress -Percentage 11 -Message "Checking for required Windows Updates..."
     $requiredUpdates = [System.Collections.Generic.List[pscustomobject]]::new()
@@ -8364,7 +8451,9 @@ try {
     if (-Not $cachedVHDXFileFound) {
         Set-Progress -Percentage 15 -Message "Creating VHDX and applying base Windows image..."
         if ($ISOPath) {
-            $wimPath = Get-WimFromISO
+			$reservedBuildDriveLetters = @($partitionDriveLetters.PSObject.Properties | ForEach-Object { [string]$_.Value })
+			$wimPath = Get-WimFromISO -ImagePath $ISOPath -ExcludedDriveLetters $reservedBuildDriveLetters
+			$windowsIsoMountedByBuild = $true
         }
         else {
             $wimPath = Get-WindowsESD -WindowsRelease $WindowsRelease -WindowsArch $WindowsArch -WindowsLang $WindowsLang -MediaType $mediaType -Metadata $esdMetadata
@@ -8538,10 +8627,9 @@ try {
             $Source = Join-Path (Split-Path $wimpath) 'sxs'
             Enable-WindowsFeaturesByName -FeatureNames $OptionalFeatures -Source $Source
         }
-        If ($ISOPath) {
-            WriteLog 'Dismounting Windows ISO'
-            Dismount-DiskImage -ImagePath $ISOPath | Out-null
-            WriteLog 'Done'
+		If ($windowsIsoMountedByBuild) {
+			Dismount-WindowsIsoSource -ImagePath $ISOPath
+			$windowsIsoMountedByBuild = $false
         }
         # If $wimPath is an ESD file, remove it only when configured
         If ($wimPath -match '\.esd$') {
@@ -8631,12 +8719,11 @@ catch {
     WriteLog "Removing $VMPath"
     Remove-Item -Path $VMPath -Force -Recurse | Out-Null
     WriteLog 'Removal complete'
-    If ($ISOPath) {
-        WriteLog 'Dismounting Windows ISO'
-        Dismount-DiskImage -ImagePath $ISOPath | Out-null
-        WriteLog 'Done'
+	If ($windowsIsoMountedByBuild) {
+		Dismount-WindowsIsoSource -ImagePath $ISOPath
+		$windowsIsoMountedByBuild = $false
     }
-    else {
+    if (-not $ISOPath) {
         # Remove ESD file only when configured
         if ($RemoveDownloadedESD -and -not [string]::IsNullOrWhiteSpace($wimPath) -and ($wimPath -match '\.esd$') -and (Test-Path -Path $wimPath)) {
             WriteLog "Deleting ESD file $wimPath"

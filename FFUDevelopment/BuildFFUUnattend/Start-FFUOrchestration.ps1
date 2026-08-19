@@ -4,6 +4,9 @@ $logPath = 'C:\Windows\Temp\FFUOrchestrationBootstrap.log'
 Start-Transcript -Path $logPath -Append -Force | Out-Null
 
 try {
+    Write-Host "---------------------------------------------------" -ForegroundColor Yellow
+    Write-Host "             FFU Builder Orchestrator              " -ForegroundColor Yellow
+    Write-Host "---------------------------------------------------" -ForegroundColor Yellow
     Write-Host 'Starting FFU orchestration bootstrap.'
     $driveLetterRuntimeDirectory = 'C:\Windows\Setup\Scripts\FFUDL'
     $driveLetterScriptPath = Join-Path -Path $driveLetterRuntimeDirectory -ChildPath 'Apply.ps1'

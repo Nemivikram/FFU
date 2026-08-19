@@ -19,12 +19,6 @@
     The script will check for the presence of each of these files and if they exist, will run the script
 #>
 
-# Header
-
-Write-Host "---------------------------------------------------" -ForegroundColor Yellow
-Write-Host "             FFU Builder Orchestrator              " -ForegroundColor Yellow
-Write-Host "---------------------------------------------------" -ForegroundColor Yellow
-
 # Define the path to the scripts
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $appsMediaRoot = Split-Path -Parent $scriptPath

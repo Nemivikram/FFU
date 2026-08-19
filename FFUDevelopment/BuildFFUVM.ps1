@@ -3931,7 +3931,7 @@ function Add-FFUDataPartitionDriveLetterCommandToUnattend {
     $descriptionElement.InnerText = 'Apply FFU data partition drive letters'
     $null = $newCommand.AppendChild($descriptionElement)
     $pathElement = $unattendXml.CreateElement('Path', $unattendNamespace)
-    $specializeCommand = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Windows\Setup\Scripts\FFUDL\Apply.ps1" -ManifestPath "C:\Windows\Setup\Scripts\FFUDL\Manifest.json" -Phase Specialize'
+    $specializeCommand = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Windows\Setup\Scripts\FFUDL\Apply.ps1" -ManifestPath "C:\Windows\Setup\Scripts\FFUDL\Manifest.json" -Phase Specialize'
     if ($specializeCommand.Length -gt 259) {
         throw "Data partition drive-letter specialize command exceeds the 259-character unattend Path limit. Length: $($specializeCommand.Length)."
     }

@@ -280,7 +280,7 @@ function Add-FFUDataPartitionDriveLetterCommandToAppliedUnattend {
     $descriptionElement.InnerText = 'Apply FFU data partition drive letters'
     $null = $newCommand.AppendChild($descriptionElement)
     $pathElement = $unattendXml.CreateElement('Path', $unattendNamespace)
-    $specializeCommand = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Windows\Setup\Scripts\FFUDL\Apply.ps1" -ManifestPath "C:\Windows\Setup\Scripts\FFUDL\Manifest.json" -Phase Specialize'
+    $specializeCommand = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Windows\Setup\Scripts\FFUDL\Apply.ps1" -ManifestPath "C:\Windows\Setup\Scripts\FFUDL\Manifest.json" -Phase Specialize'
     if ($specializeCommand.Length -gt 259) {
         throw "Data partition drive-letter specialize command exceeds the 259-character unattend Path limit. Length: $($specializeCommand.Length)."
     }
@@ -339,8 +339,12 @@ function Test-FFUDataPartitionDriveLetterCommandInAppliedUnattend {
     }
 
     $driveLetterCommand = $driveLetterCommands[0]
+    $pathNode = $driveLetterCommand.SelectSingleNode('un:Path', $namespaceManager)
     $orderNode = $driveLetterCommand.SelectSingleNode('un:Order', $namespaceManager)
     $willRebootNode = $driveLetterCommand.SelectSingleNode('un:WillReboot', $namespaceManager)
+    if ($null -eq $pathNode -or $pathNode.InnerText -notmatch '(?i)-WindowStyle\s+Hidden\s+-File(?:\s|$)') {
+        throw "Data partition drive-letter specialize command does not use a hidden PowerShell window in $UnattendPath."
+    }
     if ($null -eq $orderNode -or $orderNode.InnerText -ne '1') {
         throw "Data partition drive-letter specialize command is not first in $UnattendPath."
     }

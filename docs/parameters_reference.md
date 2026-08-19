@@ -19,6 +19,7 @@ This table lists all top-level parameters in BuildFFUVM.ps1.
 | Parameter | Type | UI Control | Description |
 | --- | --- | --- | --- |
 | -AdditionalFFUFiles | string[] | Copy Additional FFU Files + Additional FFU Files list | Array of full file paths to existing FFU files that should also be copied to the deployment USB when -CopyAdditionalFFUFiles is set to $true. |
+| -AdditionalDataPartitions | object[] | Disk Layout | Creates optional data partitions after the base Windows layout. Recovery normally remains before data partitions unless -CreateRecoveryPartition is $false. Each item supports Name, Label, DriveLetter, SizeBytes or SizeGB, FillRemaining, FileSystem, and PersistDriveLetter. DriveLetter must be D through Z and is always used in an application build VM. Only one item can use FillRemaining. PersistDriveLetter defaults to $false; unchecked partitions receive the next available physical-device letter from D upward. |
 | -AllowExternalHardDiskMedia | bool | Allow External Hard Disk Media | When set to $true, will allow the use of media identified as External Hard Disk media via WMI class Win32_DiskDrive. Default is not defined. |
 | -AllowVHDXCaching | bool | Allow VHDX Caching | When set to $true, will cache the VHDX file to the $FFUDevelopmentPath\VHDXCache folder and create a config json file that will keep track of the Windows build information, the updates installed, and the logical sector byte size information. Default is $false. |
 | -AppListPath | string | AppList.json Path | Path to a JSON file containing a list of applications to install using WinGet. Default is $FFUDevelopmentPath\Apps\AppList.json. |
@@ -40,6 +41,7 @@ This table lists all top-level parameters in BuildFFUVM.ps1.
 | -CopyPPKG | bool | Copy Provisioning Package | When set to $true, will copy the provisioning package from the $FFUDevelopmentPath\PPKG folder to the Deployment partition of the USB drive. Default is $false. |
 | -CopyUnattend | bool | Copy Unattend.xml | When set to $true, stages the selected architecture-specific unattend XML file as Unattend.xml on the Deployment partition of the USB drive. Cannot be used together with -InjectUnattend. Default is $false. |
 | -CreateDeploymentMedia | bool | Create Deployment Media | When set to $true, this will create WinPE deployment media for use when deploying to a physical device. |
+| -CreateRecoveryPartition | bool | Disk Layout | Controls whether the Recovery partition is created in the FFU VHDX. Default is $true. In the UI, remove the Recovery row to save $false and use Restore Recovery to add it back. |
 | -CustomFFUNameTemplate | string | Custom FFU Name Template | Sets a custom FFU output name with placeholders. Allowed placeholders are: {WindowsRelease}, {WindowsVersion}, {SKU}, {BuildDate}, {yyyy}, {MM}, {dd}, {H}, {hh}, {mm}, {tt}. |
 | -DeviceNamePrefixes | string[] | Specify a list of Prefixes | Sets the prefixes used when DeviceNamingMode is Prefixes. Each entry becomes a line in prefixes.txt on the deployment media. |
 | -DeviceNamePrefixesPath | string | Prefixes File Path | Path to the source prefixes file used for legacy copy or when -DeviceNamePrefixes is not supplied. Default is $FFUDevelopmentPath\Unattend\prefixes.txt. |
@@ -47,7 +49,7 @@ This table lists all top-level parameters in BuildFFUVM.ps1.
 | -DeviceNameSerialComputerNamesPath | string | Serial Computer Names CSV Mapping File Path | Path to the source CSV file used when DeviceNamingMode is SerialComputerNames and -DeviceNameSerialComputerNames is not supplied. Default is $FFUDevelopmentPath\Unattend\SerialComputerNames.csv. |
 | -DeviceNameTemplate | string | Specify Device Name | Sets the device name used when DeviceNamingMode is Template. Supports a static name or the %serial% token when -CopyUnattend is used. |
 | -DeviceNamingMode | string | Device Naming expander | Controls how device naming is handled when unattend content is copied to USB media or injected into the FFU. Accepted values are Legacy, None, Prompt, Template, Prefixes, and SerialComputerNames. The UI shows None, Prompt, Template, Prefixes, and SerialComputerNames. When device naming is left untouched in the UI, the generated config does not write DeviceNamingMode, which preserves the script default of Legacy. Prompt rewrites the staged deployment unattend to the existing manual prompt placeholder and requires -CopyUnattend. Prefixes writes prefixes.txt and requires -CopyUnattend. SerialComputerNames writes SerialComputerNames.csv and requires -CopyUnattend. |
-| -Disksize | uint64 | Disk Size (GB) | Size of the virtual hard disk for the virtual machine. Default is a 50GB dynamic disk. |
+| -Disksize | uint64 | Disk Layout: Disk Size (GB) | Size of the virtual hard disk for the virtual machine. Default is a 50GB dynamic disk. |
 | -DriversFolder | string | Drivers Folder | Path to the drivers folder. Default is $FFUDevelopmentPath\Drivers. |
 | -DriversJsonPath | string | Drivers.json Path | Path to a JSON file that specifies which drivers to download. |
 | -EnableVMNetworking | bool | Enable VM Networking (Experimental) | When set to $true, connects the build VM to the selected Hyper-V switch during provisioning. Default is $false because internet-connected Sysprep is experimental. |
@@ -69,18 +71,21 @@ This table lists all top-level parameters in BuildFFUVM.ps1.
 | -Model | string | Driver Models list | Model of the device to download drivers. This is required if Make is set. |
 | -OfficeConfigXMLFile | string | Office Configuration XML File | Path to a custom Office configuration XML file to use for installation. |
 | -Optimize | bool | Optimize | When set to $true, will optimize the FFU file. Default is $true. |
+| -OptimizeFFUPartitionNumber | int | CLI/config only | Optional partition number to pass to DISM /Optimize-FFU /PartitionNumber. Leave as 0 to optimize the Fill Remaining partition, or Windows when no partition uses Fill Remaining. |
+| -OSPartitionSize | uint64 | Disk Layout: Windows Size (GB) | Optional fixed size of the Windows partition in bytes. Leave it at 0 to let Windows use the space remaining after Recovery and fixed-size data partitions are reserved. Set a fixed size when a data partition uses FillRemaining because only one partition can fill the remaining space. The UI stores this from the GB value. |
 | -OptionalFeatures | string | Optional Features | Provide a semicolon-separated list of Windows optional features you want to include in the FFU (e.g., netfx3;TFTP). |
 | -OrchestrationPath | string | Application Path (derived Orchestration path) | Path to the orchestration folder containing scripts that run inside the VM. Default is $FFUDevelopmentPath\Apps\Orchestration. |
 | -PEDriversFolder | string | PE Drivers Folder | Path to the folder containing drivers to be injected into the WinPE deployment media. Default is $FFUDevelopmentPath\PEDrivers. |
 | -Processors | int | Processors | Number of virtual processors for the virtual machine. Recommended to use at least 4. |
 | -ProductKey | string | Product Key | Product key for the Windows edition specified in WindowsSKU. This will overwrite whatever SKU is entered for WindowsSKU. Recommended to use if you want to use a MAK or KMS key to activate Enterprise or Education. If using VL media instead of consumer media, you'll want to enter a MAK or KMS key here. |
 | -PromptExternalHardDiskMedia | bool | Prompt for External Hard Disk Media | When set to $true, will prompt the user to confirm the use of media identified as External Hard Disk media via WMI class Win32_DiskDrive. Default is $true. |
-| -RecoveryPartitionDriveLetter | string | Recovery Partition Drive Letter | Drive letter used for the Recovery partition while building the FFU VHDX. Default is R. |
+| -RecoveryPartitionDriveLetter | string | Disk Layout: Recovery Drive Letter | Drive letter used for the Recovery partition while building the FFU VHDX. Default is R. Ignored when -CreateRecoveryPartition is $false. |
+| -RecoveryPartitionSize | uint64 | Disk Layout: Recovery Size (GB) | Optional fixed size of the Recovery partition in bytes. Leave unset or 0 to let the build calculate the Recovery partition size from winre.wim plus buffer space. Ignored when -CreateRecoveryPartition is $false. The UI stores this from the GB value. |
 | -RemoveApps | bool | Remove Apps Folder Content | When set to $true, will remove the application content in the Apps folder after the FFU has been captured. Default is $true. |
 | -RemoveDownloadedESD | bool | Remove Downloaded ESD file(s) | When set to $true, downloaded Windows ESD files are automatically deleted after they have been applied. Default is $true. |
 | -RemoveFFU | bool | Remove FFU | When set to $true, will remove the FFU file from the $FFUDevelopmentPath\FFU folder after it has been copied to the USB drive. Default is $false. |
 | -RemoveUpdates | bool | Remove Downloaded Update Files | When set to $true, will remove the downloaded CU, MSRT, Defender, Edge, OneDrive, and .NET files downloaded. Default is $true. |
-| -SystemPartitionDriveLetter | string | System Partition Drive Letter | Drive letter used for the System partition while building the FFU VHDX. Default is S. |
+| -SystemPartitionDriveLetter | string | Disk Layout: System Drive Letter | Drive letter used for the System partition while building the FFU VHDX. Default is S. |
 | -Threads | int | Threads | Controls the throttle applied to parallel tasks inside the script. Default is 5, matching the UI Threads field, and applies to driver downloads invoked through Invoke-ParallelProcessing. |
 | -UnattendArm64FilePath | string | arm64 Unattend File Path | Path to the arm64 unattend XML source file used by Copy Unattend.xml and Inject Unattend.xml. Default is $FFUDevelopmentPath\Unattend\unattend_arm64.xml. |
 | -UnattendX64FilePath | string | x64 Unattend File Path | Path to the x64 unattend XML source file used by Copy Unattend.xml and Inject Unattend.xml. Default is $FFUDevelopmentPath\Unattend\unattend_x64.xml. |
@@ -100,11 +105,27 @@ This table lists all top-level parameters in BuildFFUVM.ps1.
 | -VMLocation | string | VM Location | Default is $FFUDevelopmentPath\VM. This is the location of the VHDX that gets created where Windows will be installed to. |
 | -VMSwitchName | string | VM Switch Name + Custom VM Switch Name (when Other selected) | Name of the Hyper-V virtual switch used when -EnableVMNetworking is set to $true. |
 | -WindowsArch | string | Windows Architecture | String value of 'x86', 'x64', or 'arm64'. This is used to identify which architecture of Windows to download. Default is 'x64'. |
-| -WindowsPartitionDriveLetter | string | Windows Partition Drive Letter | Drive letter used for the Windows partition while building the FFU VHDX. Default is W. |
+| -WindowsPartitionDriveLetter | string | Disk Layout: Windows Drive Letter | Drive letter used for the Windows partition while building the FFU VHDX. Default is W. |
 | -WindowsLang | string | Windows Language | String value in language-region format (e.g., 'en-us'). This is used to identify which language of media to download. Default is 'en-us'. |
 | -WindowsRelease | int | Windows Release | Integer value of 10, 11, 2016, 2019, 2021, 2022, 2024, or 2025. This is used to identify which Windows client/LTSC/server release to use. Default is 11. |
 | -WindowsSKU | string | Windows SKU | Edition/SKU to install. Accepted values are: 'Home', 'Home N', 'Home Single Language', 'Education', 'Education N', 'Pro', 'Pro N', 'Pro Education', 'Pro Education N', 'Pro for Workstations', 'Pro N for Workstations', 'Enterprise', 'Enterprise N', 'Enterprise 2016 LTSB', 'Enterprise N 2016 LTSB', 'Enterprise LTSC', 'Enterprise N LTSC', 'IoT Enterprise LTSC', 'IoT Enterprise N LTSC', 'Standard', 'Standard (Desktop Experience)', 'Datacenter', 'Datacenter (Desktop Experience)'. |
 | -WindowsVersion | string | Windows Version | String value of the Windows version to download. This is used to identify which version of Windows to download. Default is '25h2'. |
 {: .parameters-reference-table }
+
+## AdditionalDataPartitions Items
+
+Each item supports the following fields:
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `Name` | Yes | Partition name used in configuration and logs. |
+| `Label` | No | Volume label. Defaults to `Name`. |
+| `DriveLetter` | Yes | Configured letter from `D` through `Z`, without a colon. It must be unique across the complete build layout and is always used in an application build VM. It is required on a physical device only when `PersistDriveLetter` is `$true`. |
+| `SizeBytes` or `SizeGB` | Conditional | Fixed partition size. Omit only when `FillRemaining` is `$true`. |
+| `FillRemaining` | No | Uses the remaining VHDX space. Default is `$false`; only one data partition can enable it. |
+| `FileSystem` | No | `NTFS` or `ReFS`. Default is `NTFS`. |
+| `PersistDriveLetter` | No | When `$true`, requires the configured data letter in deployed Windows. When `$false`, assigns the next available letter from `D` upward. Default is `$false`. The build VM uses the configured letter regardless of this value. Recognized FFU deployment USB letters may be shifted; unrelated occupied letters remain protected. |
+
+`PersistDriveLetter` does not change VHDX cache compatibility. For application builds, temporary runtime artifacts enforce every configured data letter in the build VM after the reusable base has been cached or copied. Before capture, FFU Builder replaces the build-VM manifest with a physical-device manifest for every data partition. Builds without applications stage the physical-device manifest directly when data partitions exist.
 
 {% include page_nav.html %}

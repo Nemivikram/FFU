@@ -40,6 +40,7 @@ $script:uiState = [PSCustomObject]@{
     Data               = @{
         allDriverModels             = [System.Collections.Generic.List[PSCustomObject]]::new();
         appsScriptVariablesDataList = [System.Collections.Generic.List[PSCustomObject]]::new();
+        additionalDataPartitionsDataList = [System.Collections.Generic.List[PSCustomObject]]::new();
         versionData                 = $null; 
         vmSwitchMap                 = @{};
         logData                     = $null;
@@ -47,7 +48,8 @@ $script:uiState = [PSCustomObject]@{
         pollTimer                   = $null;
         currentBuildProcess         = $null;
         lastConfigFilePath          = $null;
-        loadedDeviceNamingMode      = $null
+        loadedDeviceNamingMode      = $null;
+        createRecoveryPartition     = $true
     };
     Flags              = @{
         installAppsForcedByUpdates        = $false;
@@ -415,9 +417,21 @@ $script:uiState.Controls.btnRun.Add_Click({
             $txtStatus = $script:uiState.Controls.txtStatus
             $progressBar.Visibility = 'Visible'
             $txtStatus.Text = "Starting FFU build..."
+
+            if (-not (Add-PendingAdditionalDataPartition -State $script:uiState)) {
+                $btnRun.IsEnabled = $true
+                $script:uiState.Controls.txtStatus.Text = "Build canceled: data partition configuration incomplete."
+                return
+            }
             
             # Gather config on the UI thread before starting the job
             $config = Get-UIConfig -State $script:uiState
+
+            if (-not (Test-DiskLayoutConfiguration -State $script:uiState -Config $config)) {
+                $btnRun.IsEnabled = $true
+                $script:uiState.Controls.txtStatus.Text = "Build canceled: disk layout validation failed."
+                return
+            }
 
             # Validate Additional FFU selection if enabled
             if ($config.BuildUSBDrive -and $config.CopyAdditionalFFUFiles -and (($null -eq $config.AdditionalFFUFiles) -or ($config.AdditionalFFUFiles.Count -eq 0))) {

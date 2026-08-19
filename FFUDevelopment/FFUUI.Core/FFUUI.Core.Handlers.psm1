@@ -377,6 +377,9 @@ function Register-EventHandlers {
     # List of TextBox controls that require integer-only input
     $integerOnlyTextBoxes = @(
         $State.Controls.txtDiskSize,
+        $State.Controls.txtOSPartitionSizeGB,
+        $State.Controls.txtRecoveryPartitionSizeGB,
+        $State.Controls.txtDataPartitionSizeGB,
         $State.Controls.txtMemory,
         $State.Controls.txtProcessors,
         $State.Controls.txtThreads,
@@ -991,6 +994,151 @@ function Register-EventHandlers {
 
             Update-VMNetworkingControls -State $localState
         })
+
+    $diskLayoutTextChangedHandler = {
+        param($eventSource, $textChangedEventArgs)
+        $window = [System.Windows.Window]::GetWindow($eventSource)
+        $localState = $window.Tag
+        Update-DiskLayoutCapacityStatus -State $localState
+    }
+
+    foreach ($diskLayoutTextBox in @($State.Controls.txtDiskSize, $State.Controls.txtOSPartitionSizeGB, $State.Controls.txtRecoveryPartitionSizeGB)) {
+        if ($null -ne $diskLayoutTextBox) {
+            $diskLayoutTextBox.Add_TextChanged($diskLayoutTextChangedHandler)
+        }
+    }
+
+    $State.Controls.chkDataPartitionFillRemaining.Add_Checked({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            $localState.Controls.txtDataPartitionSizeGB.IsEnabled = $false
+            $localState.Controls.txtDataPartitionSizeGB.Clear()
+        })
+
+    $State.Controls.chkDataPartitionFillRemaining.Add_Unchecked({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            $localState.Controls.txtDataPartitionSizeGB.IsEnabled = $true
+        })
+
+    $State.Controls.btnAddDataPartition.Add_Click({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            Add-AdditionalDataPartition -State $localState
+        })
+
+    $State.Controls.btnRemoveSelectedDataPartitions.Add_Click({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            Remove-SelectedDataPartition -State $localState
+        })
+
+    $State.Controls.btnClearDataPartitions.Add_Click({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            Clear-AdditionalDataPartitions -State $localState
+        })
+
+	$State.Controls.btnResetDiskLayoutToDefaults.Add_Click({
+			param($eventSource, $routedEventArgs)
+			$window = [System.Windows.Window]::GetWindow($eventSource)
+			$localState = $window.Tag
+			$null = Reset-DiskLayoutToDefaults -State $localState -PromptForConfirmation
+		})
+
+    $State.Controls.btnRestoreRecoveryPartition.Add_Click({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            Restore-RecoveryPartition -State $localState
+        })
+
+    $State.Controls.btnMoveDataPartitionTop.Add_Click({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            Move-DataPartitionRow -State $localState -Direction Top
+        })
+
+    $State.Controls.btnMoveDataPartitionUp.Add_Click({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            Move-DataPartitionRow -State $localState -Direction Up
+        })
+
+    $State.Controls.btnMoveDataPartitionDown.Add_Click({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            Move-DataPartitionRow -State $localState -Direction Down
+        })
+
+    $State.Controls.btnMoveDataPartitionBottom.Add_Click({
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            Move-DataPartitionRow -State $localState -Direction Bottom
+        })
+
+    $State.Controls.lstDataPartitions.Add_PreviewKeyDown({
+            param($eventSource, $keyEvent)
+            if ($keyEvent.Key -eq 'Space') {
+                $window = [System.Windows.Window]::GetWindow($eventSource)
+                $localState = $window.Tag
+                Invoke-ListViewItemToggle -ListView $eventSource -State $localState -HeaderCheckBoxKeyName 'chkSelectAllDataPartitions'
+                Update-DiskLayoutActionButtonsState -State $localState
+                $keyEvent.Handled = $true
+            }
+        })
+
+    $State.Controls.lstDataPartitions.Add_SelectionChanged({
+            param($eventSource, $selChangeEvent)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            Update-DiskLayoutActionButtonsState -State $localState
+        })
+
+    $State.Controls.lstDataPartitions.AddHandler(
+        [System.Windows.Controls.Primitives.ButtonBase]::ClickEvent,
+        [System.Windows.RoutedEventHandler] {
+            param($eventSource, $routedEventArgs)
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+
+            $originalSource = $routedEventArgs.OriginalSource
+            if ($originalSource -is [System.Windows.Controls.Primitives.ToggleButton] -and -not ($originalSource -is [System.Windows.Controls.CheckBox])) { return }
+
+            $partitionRow = $originalSource.DataContext
+            if ($originalSource -is [System.Windows.Controls.CheckBox] -and [string]$originalSource.Tag -eq 'DiskLayoutFillRemaining' -and $null -ne $partitionRow -and $null -ne $partitionRow.PSObject.Properties['PartitionType']) {
+                Update-DiskLayoutFillRemainingState -State $localState -PartitionRow $partitionRow
+            }
+            else {
+                Update-DiskLayoutCapacityStatus -State $localState
+            }
+            Update-DiskLayoutActionButtonsState -State $localState
+        })
+
+    $State.Controls.lstDataPartitions.AddHandler(
+        [System.Windows.UIElement]::LostKeyboardFocusEvent,
+        [System.Windows.Input.KeyboardFocusChangedEventHandler] {
+            param($eventSource, $focusChangedEventArgs)
+            $textBox = $focusChangedEventArgs.OriginalSource
+            if ($null -eq $textBox -or -not ($textBox -is [System.Windows.Controls.TextBox])) { return }
+
+            $partitionRow = $textBox.DataContext
+            if ($null -eq $partitionRow -or $null -eq $partitionRow.PSObject.Properties['PartitionType']) { return }
+
+            $window = [System.Windows.Window]::GetWindow($eventSource)
+            $localState = $window.Tag
+            Update-DiskLayoutCapacityStatus -State $localState
+        },
+        $true)
 
     # Persist custom VM switch name when user edits it while 'Other' is selected
     $State.Controls.txtCustomVMSwitchName.Add_LostFocus({

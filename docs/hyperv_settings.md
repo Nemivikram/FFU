@@ -23,10 +23,6 @@ Drop down of detected VM Switches. There's also an **Other** option which allows
 
 This setting is only used when **Enable VM Networking (Experimental)** is turned on. VM-based builds still capture from the host-side VHDX after the VM shuts down, so you only need a switch when the VM requires network connectivity during provisioning.
 
-## Disk Size (GB)
-
-Size of the virtual hard disk for the virtual machine. Default is a 50GB dynamic disk. You may want to increase the size if you're installing many apps.
-
 ## Memory (GB)
 
 Amount of memory to allocate for the virtual machine. Recommended to use 8GB if possible, especially for Windows 11. Default is 4GB.
@@ -43,19 +39,35 @@ Default is `$FFUDevelopmentPath\VM`. This is the location of the VHDX that gets 
 
 Prefix for the generated VM. Default is _FFU.
 
-## System Partition Drive Letter
+## Disk Layout
 
-Drive letter used for the System partition while building the FFU VHDX. Default is `S`.
+Configures the VHDX size and the build-time partition layout used for the captured FFU.
 
-## Windows Partition Drive Letter
+**Disk Size (GB)** sets the virtual hard disk size for the VM. Default is a 50GB dynamic disk. Increase this when the image needs more space for Windows, apps, updates, or data partitions.
 
-Drive letter used for the Windows partition while building the FFU VHDX. Default is `W`.
+The partition list shows the build order: System, MSR, Windows, Recovery, and optional data partitions. System, Windows, and Recovery have editable build-time drive letters. Defaults are `S`, `W`, and `R`. The MSR row is display-only, fixed at 16MB, and does not use a drive letter.
 
-## Recovery Partition Drive Letter
+The System, Windows, and Recovery selections are host-side build letters only. Installed Windows uses `C:` for its Windows partition, while System and Recovery normally have no letter. The deployment script discovers these partitions from the applied disk instead of relying on the build letters.
 
-Drive letter used for the Recovery partition while building the FFU VHDX. Default is `R`.
+Leave the Windows size blank to let Windows use the space remaining after Recovery and fixed-size data partitions are reserved. This allows you to give a data partition a fixed size while Windows uses the rest of the VHDX. If a data partition will use **Fill Remaining**, give Windows a fixed size first because only one partition can fill the remaining space.
 
-These settings only affect FFU creation. They do not change the hard-coded drive letters used by `ApplyFFU.ps1` during deployment.
+Use the Recovery size only when you need a fixed Recovery partition size. Leave it blank to let the build calculate the Recovery size from `winre.wim` plus buffer space.
+
+The Recovery partition can be removed by selecting its row checkbox and using **Remove Selected**. Use **Restore Recovery** to add it back before saving or building. Removing Recovery saves `CreateRecoveryPartition` as `false` in the generated config.
+
+Each data partition has a name, a drive letter from `D:` through `Z:`, and either a size in GB or **Fill Remaining**. When FFU Builder installs applications in a build VM, the partition uses this configured letter before any application scripts run. Only one Windows or data partition can use **Fill Remaining**. Data partitions can be reordered with the arrow buttons. **Clear** removes only data partitions, not the base partition rows.
+
+When you provide a Windows ISO, Windows temporarily assigns the mounted ISO a host drive letter. If that letter is configured for a build partition, FFU Builder moves only the Windows ISO to another unused letter before creating the VHDX partitions. An ISO that does not conflict keeps its original mounted letter.
+
+Use **Reset to Default** to restore the System, MSR, Windows, and Recovery rows and remove all additional data partitions. The reset restores the default `S:`, `W:`, and `R:` build letters, makes Windows use **Fill Remaining**, and returns Recovery to automatic sizing. It does not change **Disk Size** or **Logical Sector Size**.
+
+**Persist Drive Letter** is off by default and controls whether the configured letter is also required on a physical device. The build VM uses the configured letter whether or not this option is selected. When selected, FFU Builder requires the same letter when a deployed device enters the Windows `specialize` pass. When cleared, the partition receives the lowest available letter from `D:` upward in data-partition order.
+
+During `specialize`, FFU Builder reserves configured persisted letters and letters owned by unrelated volumes before assigning unchecked partitions. If recognized FFU deployment media occupies a needed letter, all lettered partitions on that USB or removable disk are shifted to the next available letters after the internal data partitions. FFU Builder does not move unrelated volumes or file-system mappings; a configured-letter conflict with one of those owners stops deployment.
+
+Windows PE drive letters are temporary and can change when hardware is detected, so assigning a letter only in PE does not provide the installed-Windows guarantee. See [WinPE: Identify drive letters with a script](https://learn.microsoft.com/windows-hardware/manufacture/desktop/winpe-identify-drive-letters?view=windows-11). First-boot enforcement runs in a hidden Windows PowerShell session. Successful enforcement removes its temporary script and manifest and leaves the diagnostic log at `C:\Windows\Temp\FFUDataPartitionDriveLetters.log`.
+
+The Apps ISO drive letter is discovered at runtime. If you create a data partition that uses `D:`, application installs should use `%FFUAppsRoot%` for Apps ISO paths. Legacy `D:\` paths in `UserAppList.json` are still supported when they point to files on the Apps ISO.
 
 ## Logical Sector Size
 

@@ -250,6 +250,11 @@ A cached VHDX is reused only when the cache metadata matches your current build 
 - Logical sector size (512 vs 4096)
 - Optional features selection
 - The exact set of update payload file names downloaded for that run (SSU/CU/.NET/etc.)
+- Disk size, Recovery layout, and the ordered data-partition name, label, file system, size, and **Fill Remaining** settings
+
+System, Windows, Recovery, and data drive letters do not affect cache matching. The per-data-partition **Persist Drive Letter** setting also does not affect matching. On a cache hit, FFU Builder copies the cached base and applies the current host build letters only to that working copy.
+
+Cache metadata from the earlier drive-letter-aware schema is skipped rather than migrated or deleted. The first build after this change may create one replacement cache. Remove older VHDX and config pairs manually after confirming the replacement is usable.
 
 #### Disk Usage and Cleanup
 
@@ -260,6 +265,20 @@ VHDX caching trades disk space for speed. The `VHDXCache` folder can grow over t
 > Note
 >
 > To force a full rebuild, delete the contents of `$FFUDevelopmentPath\VHDXCache` (or disable **Allow VHDX Caching**) and run the build again.
+
+### Data Drive Letter Assignment
+
+Each data partition's configured letter is used in the build VM whenever FFU Builder installs applications in a VM. This happens whether or not **Persist Drive Letter** is selected. The option is off by default, controls whether the configured letter is also used on deployed physical devices, and data letters are limited to `D:` through `Z:`.
+
+FFU Builder applies and verifies every configured data letter in audit mode before it searches for the Apps ISO or runs application scripts. The host requires an audit success marker before it captures the VHDX. Before capture, FFU Builder replaces the build-VM manifest with a deployment manifest containing every data partition. Entries with **Persist Drive Letter** selected retain the configured letter; other entries use automatic assignment. Builds without a VM stage the same deployment files directly in the working VHDX whenever it contains data partitions.
+
+On a deployed device, FFU Builder inserts the assignment command first in `Microsoft-Windows-Deployment\RunSynchronous` for the Windows `specialize` pass. Microsoft documents that these commands run in order and in system context during `specialize`; see [RunSynchronous](https://learn.microsoft.com/windows-hardware/customize/desktop/unattend/microsoft-windows-deployment-runsynchronous). The command uses `WillReboot=OnRequest`, returns `0` only after assignment and cleanup succeed, and returns `3` on failure. Microsoft documents that with `OnRequest`, return codes other than `0`, `1`, or `2` terminate installation; see [WillReboot](https://learn.microsoft.com/windows-hardware/customize/desktop/unattend/microsoft-windows-deployment-runsynchronous-runsynchronouscommand-willreboot).
+
+An optimized FFU can resize the Windows partition or the partition selected by `-OptimizeFFUPartitionNumber` when it is applied to a differently sized drive. If a data partition is the selected resize target, drive-letter enforcement accepts its deployed size while still requiring its GPT identity, partition number, volume label, and file system to match the captured partition. Other data partitions must retain their captured sizes. See [Optimize an FFU](https://learn.microsoft.com/windows-hardware/manufacture/desktop/deploy-windows-using-full-flash-update--ffu?view=windows-11#optimize-an-ffu).
+
+On a deployed device, partitions with **Persist Drive Letter** selected require their configured letters. Unchecked partitions receive the lowest available letters from `D:` upward in data-partition order, after configured letters and unrelated occupied letters are reserved. If a needed letter belongs to recognized FFU deployment media, FFU Builder shifts the assigned letters for that USB or removable disk after the internal data letters. It does not move unrelated volumes or file-system mappings; a configured-letter conflict with one of those owners is fatal. A successful deployed run removes the dedicated runtime directory, script, manifest, and markers. It leaves only `C:\Windows\Temp\FFUDataPartitionDriveLetters.log`. A failed run retains the runtime inputs and failure marker for diagnosis.
+
+When FFU Builder deployment media applies the image, `ApplyFFU.ps1` treats PE letters as temporary. If a custom deployment unattend is copied from USB, the script merges the assignment command into that final Panther answer file and preserves its other settings. Without a custom unattend, it verifies that the command embedded in the FFU is still present. Captured images with no data partitions contain no assignment directory, manifest, markers, or unattend command.
 
 ### Create Deployment Media
 

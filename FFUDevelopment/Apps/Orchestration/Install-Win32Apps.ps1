@@ -6,6 +6,102 @@ param(
     [string]$userAppsJsonFile = (Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath "UserAppList.json")
 )
 
+function Get-AppsMediaRoot {
+    $appsRoot = [string]$env:FFUAppsRoot
+    if ([string]::IsNullOrWhiteSpace($appsRoot)) {
+        return $null
+    }
+
+    return $appsRoot.Trim().TrimEnd('\')
+}
+
+function Expand-AppsMediaRootTokens {
+    param(
+        [AllowNull()]
+        [string]$Value
+    )
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    $appsRoot = Get-AppsMediaRoot
+    if ([string]::IsNullOrWhiteSpace($appsRoot)) {
+        return $Value
+    }
+
+    $tokenPattern = '%FFUAppsRoot%|\$\{?env:FFUAppsRoot\}?|\{FFUAppsRoot\}'
+    $regexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+    return [regex]::Replace($Value, $tokenPattern, [System.Text.RegularExpressions.MatchEvaluator] { param($match) $appsRoot }, $regexOptions)
+}
+
+function Resolve-LegacyAppsMediaPath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    if ($Path -notmatch '^(?i)d:\\') {
+        return $Path
+    }
+
+    $appsRoot = Get-AppsMediaRoot
+    if ([string]::IsNullOrWhiteSpace($appsRoot)) {
+        return $Path
+    }
+
+    $relativePath = $Path.Substring(3)
+    $candidatePath = Join-Path -Path $appsRoot -ChildPath $relativePath
+    $literalExists = Test-Path -Path $Path
+    $candidateExists = Test-Path -Path $candidatePath
+
+    if ($literalExists) {
+        if ($candidateExists) {
+            Write-Warning "Both legacy Apps path '$Path' and Apps media path '$candidatePath' exist. Keeping literal path."
+        }
+        return $Path
+    }
+
+    if ($candidateExists) {
+        Write-Host "Remapped legacy Apps path '$Path' to '$candidatePath'."
+        return $candidatePath
+    }
+
+    return $Path
+}
+
+function Resolve-AppsMediaPathValue {
+    param(
+        [AllowNull()]
+        [string]$Value
+    )
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    $resolvedValue = Expand-AppsMediaRootTokens -Value $Value
+    if ($resolvedValue -match '^(?i)d:\\') {
+        return Resolve-LegacyAppsMediaPath -Path $resolvedValue
+    }
+
+    $regexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+    $resolvedValue = [regex]::Replace($resolvedValue, '"(?<path>d:\\[^"\r\n]+)"', [System.Text.RegularExpressions.MatchEvaluator] {
+        param($match)
+        '"' + (Resolve-LegacyAppsMediaPath -Path $match.Groups['path'].Value) + '"'
+    }, $regexOptions)
+    $resolvedValue = [regex]::Replace($resolvedValue, '''(?<path>d:\\[^''\r\n]+)''', [System.Text.RegularExpressions.MatchEvaluator] {
+        param($match)
+        "'" + (Resolve-LegacyAppsMediaPath -Path $match.Groups['path'].Value) + "'"
+    }, $regexOptions)
+    $resolvedValue = [regex]::Replace($resolvedValue, '(?<![\w:"''])(?<path>d:\\[^\s"'']+)', [System.Text.RegularExpressions.MatchEvaluator] {
+        param($match)
+        Resolve-LegacyAppsMediaPath -Path $match.Groups['path'].Value
+    }, $regexOptions)
+
+    return $resolvedValue
+}
+
 function Invoke-Process {
     [CmdletBinding(SupportsShouldProcess)]
     param
@@ -198,17 +294,19 @@ function Install-Applications {
         }
         
         try {
+            $commandLineToRun = Resolve-AppsMediaPathValue -Value $app.CommandLine
+
             # Normalize arguments: treat null/empty/whitespace as no arguments
             $argumentsToPass = $null
             if ($null -ne $app.Arguments) {
                 if ($app.Arguments -is [array]) {
-                    $trimmed = $app.Arguments | ForEach-Object { ($_ | ForEach-Object { if ($_ -ne $null) { $_.ToString().Trim() } else { $_ } }) } | Where-Object { $_ -and (-not [string]::IsNullOrWhiteSpace($_)) }
+                    $trimmed = $app.Arguments | ForEach-Object { ($_ | ForEach-Object { if ($_ -ne $null) { Resolve-AppsMediaPathValue -Value $_.ToString().Trim() } else { $_ } }) } | Where-Object { $_ -and (-not [string]::IsNullOrWhiteSpace($_)) }
                     if ($trimmed.Count -gt 0) {
                         $argumentsToPass = $trimmed
                     }
                 }
                 else {
-                    $single = $app.Arguments.ToString().Trim()
+                    $single = Resolve-AppsMediaPathValue -Value $app.Arguments.ToString().Trim()
                     if (-not [string]::IsNullOrWhiteSpace($single)) {
                         $argumentsToPass = @($single)
                     }
@@ -231,19 +329,19 @@ function Install-Applications {
             # Auto-quote MSI paths if using msiexec and path contains spaces but no quotes
             if ($null -ne $argumentsToPass -and $argumentsToPass.Count -gt 0) {
                 $joinedArgs = $argumentsToPass -join ' '
-                $formattedArgs = Format-MsiArguments -CommandLine $app.CommandLine -Arguments $joinedArgs
+                $formattedArgs = Format-MsiArguments -CommandLine $commandLineToRun -Arguments $joinedArgs
                 if ($formattedArgs -ne $joinedArgs) {
                     $argumentsToPass = @($formattedArgs)
                 }
             }
 
             if ($null -eq $argumentsToPass -or $argumentsToPass.Count -eq 0) {
-                Write-Host "Running command: $($app.CommandLine) (no arguments)"
-                $result = Invoke-Process -FilePath $app.CommandLine -AdditionalSuccessCodes $additionalSuccessCodes -IgnoreNonZeroExitCodes $ignoreNonZeroExitCodes
+                Write-Host "Running command: $commandLineToRun (no arguments)"
+                $result = Invoke-Process -FilePath $commandLineToRun -AdditionalSuccessCodes $additionalSuccessCodes -IgnoreNonZeroExitCodes $ignoreNonZeroExitCodes
             }
             else {
-                Write-Host "Running command: $($app.CommandLine) $($argumentsToPass -join ' ')"
-                $result = Invoke-Process -FilePath $app.CommandLine -ArgumentList $argumentsToPass -AdditionalSuccessCodes $additionalSuccessCodes -IgnoreNonZeroExitCodes $ignoreNonZeroExitCodes
+                Write-Host "Running command: $commandLineToRun $($argumentsToPass -join ' ')"
+                $result = Invoke-Process -FilePath $commandLineToRun -ArgumentList $argumentsToPass -AdditionalSuccessCodes $additionalSuccessCodes -IgnoreNonZeroExitCodes $ignoreNonZeroExitCodes
             }
             Write-Host "$($app.Name) exited with exit code: $($result.ExitCode)`r`n"
         }

@@ -324,9 +324,6 @@
                                         <!-- Custom VM Switch Name -->
                                         <TextBox x:Name="txtCustomVMSwitchName" HorizontalAlignment="Stretch" Visibility="Collapsed" Margin="0,0,0,0" ToolTip="Enter your custom VM Switch Name if 'Other' is selected."/>
                                     </StackPanel>
-                                    <!-- Disk Size (GB) -->
-                                    <TextBlock Text="Disk Size (GB)" Margin="0,0,0,8" ToolTip="Size of the virtual hard disk for the virtual machine. Default is a 50GB dynamic disk."/>
-                                    <TextBox x:Name="txtDiskSize" HorizontalAlignment="Stretch" Text="50" Margin="0,0,0,20" ToolTip="Size of the virtual hard disk for the virtual machine. Default is a 50GB dynamic disk."/>
                                     <!-- Memory (GB) -->
                                     <TextBlock Text="Memory (GB)" Margin="0,0,0,8" ToolTip="Amount of memory to allocate for the virtual machine. Recommended to use 8GB if possible, especially for Windows 11. Default is 4GB."/>
                                     <TextBox x:Name="txtMemory" HorizontalAlignment="Stretch" Text="4" Margin="0,0,0,20" ToolTip="Amount of memory to allocate for the virtual machine. Recommended to use 8GB if possible, especially for Windows 11. Default is 4GB."/>
@@ -339,96 +336,106 @@
                                     <!-- VM Name Prefix -->
                                     <TextBlock Text="VM Name Prefix" Margin="0,0,0,8" ToolTip="Prefix for the VM Name. The default is _FFU."/>
                                     <TextBox x:Name="txtVMNamePrefix" HorizontalAlignment="Stretch" Margin="0,0,0,20" ToolTip="Prefix for the VM Name. The default is _FFU."/>
-                                    <!-- System Partition Drive Letter -->
-                                    <TextBlock Text="System Partition Drive Letter" Margin="0,0,0,8" ToolTip="Drive letter used for the System partition while building the FFU VHDX. Default is S."/>
-                                    <ComboBox x:Name="cmbSystemPartitionDriveLetter" HorizontalAlignment="Left" Margin="0,0,0,20" ToolTip="Drive letter used for the System partition while building the FFU VHDX. Default is S.">
-                                        <ComboBoxItem Content="A"/>
-                                        <ComboBoxItem Content="B"/>
-                                        <ComboBoxItem Content="C"/>
-                                        <ComboBoxItem Content="D"/>
-                                        <ComboBoxItem Content="E"/>
-                                        <ComboBoxItem Content="F"/>
-                                        <ComboBoxItem Content="G"/>
-                                        <ComboBoxItem Content="H"/>
-                                        <ComboBoxItem Content="I"/>
-                                        <ComboBoxItem Content="J"/>
-                                        <ComboBoxItem Content="K"/>
-                                        <ComboBoxItem Content="L"/>
-                                        <ComboBoxItem Content="M"/>
-                                        <ComboBoxItem Content="N"/>
-                                        <ComboBoxItem Content="O"/>
-                                        <ComboBoxItem Content="P"/>
-                                        <ComboBoxItem Content="Q"/>
-                                        <ComboBoxItem Content="R"/>
-                                        <ComboBoxItem Content="S" IsSelected="True"/>
-                                        <ComboBoxItem Content="T"/>
-                                        <ComboBoxItem Content="U"/>
-                                        <ComboBoxItem Content="V"/>
-                                        <ComboBoxItem Content="W"/>
-                                        <ComboBoxItem Content="X"/>
-                                        <ComboBoxItem Content="Y"/>
-                                        <ComboBoxItem Content="Z"/>
-                                    </ComboBox>
-                                    <!-- Windows Partition Drive Letter -->
-                                    <TextBlock Text="Windows Partition Drive Letter" Margin="0,0,0,8" ToolTip="Drive letter used for the Windows partition while building the FFU VHDX. Default is W."/>
-                                    <ComboBox x:Name="cmbWindowsPartitionDriveLetter" HorizontalAlignment="Left" Margin="0,0,0,20" ToolTip="Drive letter used for the Windows partition while building the FFU VHDX. Default is W.">
-                                        <ComboBoxItem Content="A"/>
-                                        <ComboBoxItem Content="B"/>
-                                        <ComboBoxItem Content="C"/>
-                                        <ComboBoxItem Content="D"/>
-                                        <ComboBoxItem Content="E"/>
-                                        <ComboBoxItem Content="F"/>
-                                        <ComboBoxItem Content="G"/>
-                                        <ComboBoxItem Content="H"/>
-                                        <ComboBoxItem Content="I"/>
-                                        <ComboBoxItem Content="J"/>
-                                        <ComboBoxItem Content="K"/>
-                                        <ComboBoxItem Content="L"/>
-                                        <ComboBoxItem Content="M"/>
-                                        <ComboBoxItem Content="N"/>
-                                        <ComboBoxItem Content="O"/>
-                                        <ComboBoxItem Content="P"/>
-                                        <ComboBoxItem Content="Q"/>
-                                        <ComboBoxItem Content="R"/>
-                                        <ComboBoxItem Content="S"/>
-                                        <ComboBoxItem Content="T"/>
-                                        <ComboBoxItem Content="U"/>
-                                        <ComboBoxItem Content="V"/>
-                                        <ComboBoxItem Content="W" IsSelected="True"/>
-                                        <ComboBoxItem Content="X"/>
-                                        <ComboBoxItem Content="Y"/>
-                                        <ComboBoxItem Content="Z"/>
-                                    </ComboBox>
-                                    <!-- Recovery Partition Drive Letter -->
-                                    <TextBlock Text="Recovery Partition Drive Letter" Margin="0,0,0,8" ToolTip="Drive letter used for the Recovery partition while building the FFU VHDX. Default is R."/>
-                                    <ComboBox x:Name="cmbRecoveryPartitionDriveLetter" HorizontalAlignment="Left" Margin="0,0,0,20" ToolTip="Drive letter used for the Recovery partition while building the FFU VHDX. Default is R.">
-                                        <ComboBoxItem Content="A"/>
-                                        <ComboBoxItem Content="B"/>
-                                        <ComboBoxItem Content="C"/>
-                                        <ComboBoxItem Content="D"/>
-                                        <ComboBoxItem Content="E"/>
-                                        <ComboBoxItem Content="F"/>
-                                        <ComboBoxItem Content="G"/>
-                                        <ComboBoxItem Content="H"/>
-                                        <ComboBoxItem Content="I"/>
-                                        <ComboBoxItem Content="J"/>
-                                        <ComboBoxItem Content="K"/>
-                                        <ComboBoxItem Content="L"/>
-                                        <ComboBoxItem Content="M"/>
-                                        <ComboBoxItem Content="N"/>
-                                        <ComboBoxItem Content="O"/>
-                                        <ComboBoxItem Content="P"/>
-                                        <ComboBoxItem Content="Q"/>
-                                        <ComboBoxItem Content="R" IsSelected="True"/>
-                                        <ComboBoxItem Content="S"/>
-                                        <ComboBoxItem Content="T"/>
-                                        <ComboBoxItem Content="U"/>
-                                        <ComboBoxItem Content="V"/>
-                                        <ComboBoxItem Content="W"/>
-                                        <ComboBoxItem Content="X"/>
-                                        <ComboBoxItem Content="Y"/>
-                                        <ComboBoxItem Content="Z"/>
-                                    </ComboBox>
+                                    <!-- Disk Layout -->
+                                    <Expander Header="Disk Layout" Margin="0,0,0,20" IsExpanded="True">
+                                        <StackPanel Margin="0,10,0,0">
+                                            <TextBlock Text="FFU Builder defaults to using a 50GB VHDX. Below you can modify the disk size, add additional data/primary partitions, change the drive letters, and set the partition sizes for the Windows, Recovery, and data partitions. The total of the partition sizes must be less than or equal to the Disk Size. The Recovery partition will auto-size based on the size of WinRE.wim from the Windows media with additional buffer as per Microsoft recommendations. You can adjust the size of the recovery partition if needed (not recommended).&#x0a;&#x0a;You can only reorder the additional data partitions." TextWrapping="Wrap" Margin="0,0,0,16"/>
+                                            <TextBlock Text="Disk Size (GB)" Margin="0,0,0,8" ToolTip="Size of the virtual hard disk for the virtual machine. Default is a 50GB dynamic disk."/>
+                                            <TextBox x:Name="txtDiskSize" Width="160" HorizontalAlignment="Left" Text="50" Margin="0,0,0,16" ToolTip="Size of the virtual hard disk for the virtual machine. Default is a 50GB dynamic disk."/>
+
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                                                <Ellipse x:Name="ellipseDiskLayoutCapacityStatus" Width="14" Height="14" Fill="Gold" Margin="0,3,10,0" VerticalAlignment="Top"/>
+                                                <StackPanel>
+                                                    <TextBlock Text="Partition capacity" FontWeight="SemiBold"/>
+                                                    <TextBlock x:Name="txtDiskLayoutCapacityStatusValue" Text="Checking disk layout capacity..." TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                            </StackPanel>
+
+                                            <StackPanel Visibility="Collapsed">
+                                                <ComboBox x:Name="cmbSystemPartitionDriveLetter" SelectedIndex="18"><ComboBoxItem Content="A"/><ComboBoxItem Content="B"/><ComboBoxItem Content="C"/><ComboBoxItem Content="D"/><ComboBoxItem Content="E"/><ComboBoxItem Content="F"/><ComboBoxItem Content="G"/><ComboBoxItem Content="H"/><ComboBoxItem Content="I"/><ComboBoxItem Content="J"/><ComboBoxItem Content="K"/><ComboBoxItem Content="L"/><ComboBoxItem Content="M"/><ComboBoxItem Content="N"/><ComboBoxItem Content="O"/><ComboBoxItem Content="P"/><ComboBoxItem Content="Q"/><ComboBoxItem Content="R"/><ComboBoxItem Content="S"/><ComboBoxItem Content="T"/><ComboBoxItem Content="U"/><ComboBoxItem Content="V"/><ComboBoxItem Content="W"/><ComboBoxItem Content="X"/><ComboBoxItem Content="Y"/><ComboBoxItem Content="Z"/></ComboBox>
+                                                <ComboBox x:Name="cmbWindowsPartitionDriveLetter" SelectedIndex="22"><ComboBoxItem Content="A"/><ComboBoxItem Content="B"/><ComboBoxItem Content="C"/><ComboBoxItem Content="D"/><ComboBoxItem Content="E"/><ComboBoxItem Content="F"/><ComboBoxItem Content="G"/><ComboBoxItem Content="H"/><ComboBoxItem Content="I"/><ComboBoxItem Content="J"/><ComboBoxItem Content="K"/><ComboBoxItem Content="L"/><ComboBoxItem Content="M"/><ComboBoxItem Content="N"/><ComboBoxItem Content="O"/><ComboBoxItem Content="P"/><ComboBoxItem Content="Q"/><ComboBoxItem Content="R"/><ComboBoxItem Content="S"/><ComboBoxItem Content="T"/><ComboBoxItem Content="U"/><ComboBoxItem Content="V"/><ComboBoxItem Content="W"/><ComboBoxItem Content="X"/><ComboBoxItem Content="Y"/><ComboBoxItem Content="Z"/></ComboBox>
+                                                <ComboBox x:Name="cmbRecoveryPartitionDriveLetter" SelectedIndex="17"><ComboBoxItem Content="A"/><ComboBoxItem Content="B"/><ComboBoxItem Content="C"/><ComboBoxItem Content="D"/><ComboBoxItem Content="E"/><ComboBoxItem Content="F"/><ComboBoxItem Content="G"/><ComboBoxItem Content="H"/><ComboBoxItem Content="I"/><ComboBoxItem Content="J"/><ComboBoxItem Content="K"/><ComboBoxItem Content="L"/><ComboBoxItem Content="M"/><ComboBoxItem Content="N"/><ComboBoxItem Content="O"/><ComboBoxItem Content="P"/><ComboBoxItem Content="Q"/><ComboBoxItem Content="R"/><ComboBoxItem Content="S"/><ComboBoxItem Content="T"/><ComboBoxItem Content="U"/><ComboBoxItem Content="V"/><ComboBoxItem Content="W"/><ComboBoxItem Content="X"/><ComboBoxItem Content="Y"/><ComboBoxItem Content="Z"/></ComboBox>
+                                                <TextBox x:Name="txtOSPartitionSizeGB"/>
+                                                <TextBox x:Name="txtRecoveryPartitionSizeGB"/>
+                                            </StackPanel>
+
+                                            <TextBlock Text="Add Partition" FontWeight="SemiBold" Margin="0,0,0,8"/>
+
+                                            <Grid Margin="0,0,0,12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="2*"/>
+                                                    <ColumnDefinition Width="120"/>
+                                                    <ColumnDefinition Width="140"/>
+                                                    <ColumnDefinition Width="130"/>
+                                                    <ColumnDefinition Width="160"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" Margin="0,0,8,8"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="1" Text="Drive Letter" Margin="0,0,8,8"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="2" Text="Size (GB)" Margin="0,0,8,8"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="3" Text="Fill Remaining" Margin="0,0,8,8"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="4" Text="Persist Drive Letter" Margin="0,0,8,8"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="5" Text=" " Margin="0,0,0,8"/>
+                                                <TextBox x:Name="txtDataPartitionName" Grid.Row="1" Grid.Column="0" Margin="0,0,8,0" ToolTip="Name and volume label for the data partition."/>
+                                                <ComboBox x:Name="cmbDataPartitionDriveLetter" Grid.Row="1" Grid.Column="1" Margin="0,0,8,0" ToolTip="Configured data-partition drive letter. The build VM always uses it; physical devices use it when Persist Drive Letter is selected.">
+                                                    <ComboBoxItem Content="D" IsSelected="True"/>
+                                                    <ComboBoxItem Content="E"/>
+                                                    <ComboBoxItem Content="F"/>
+                                                    <ComboBoxItem Content="G"/>
+                                                    <ComboBoxItem Content="H"/>
+                                                    <ComboBoxItem Content="I"/>
+                                                    <ComboBoxItem Content="J"/>
+                                                    <ComboBoxItem Content="K"/>
+                                                    <ComboBoxItem Content="L"/>
+                                                    <ComboBoxItem Content="M"/>
+                                                    <ComboBoxItem Content="N"/>
+                                                    <ComboBoxItem Content="O"/>
+                                                    <ComboBoxItem Content="P"/>
+                                                    <ComboBoxItem Content="Q"/>
+                                                    <ComboBoxItem Content="R"/>
+                                                    <ComboBoxItem Content="S"/>
+                                                    <ComboBoxItem Content="T"/>
+                                                    <ComboBoxItem Content="U"/>
+                                                    <ComboBoxItem Content="V"/>
+                                                    <ComboBoxItem Content="W"/>
+                                                    <ComboBoxItem Content="X"/>
+                                                    <ComboBoxItem Content="Y"/>
+                                                    <ComboBoxItem Content="Z"/>
+                                                </ComboBox>
+                                                <TextBox x:Name="txtDataPartitionSizeGB" Grid.Row="1" Grid.Column="2" Margin="0,0,8,0" ToolTip="Data partition size in GB. Leave blank only when Fill Remaining is selected."/>
+                                                <CheckBox x:Name="chkDataPartitionFillRemaining" Grid.Row="1" Grid.Column="3" Margin="0,0,8,0" VerticalAlignment="Center" ToolTip="Use the remaining VHDX space for this data partition. Only one data partition can fill remaining space."/>
+                                                <CheckBox x:Name="chkDataPartitionPersistDriveLetter" Grid.Row="1" Grid.Column="4" Margin="0,0,8,0" VerticalAlignment="Center" ToolTip="Use the configured letter on physical devices. If cleared, deployed Windows assigns the next available letter from D: upward. The build VM always uses the configured letter. FFU deployment USB letters may be shifted."/>
+                                                <Button x:Name="btnAddDataPartition" Grid.Row="1" Grid.Column="5" Content="Add Data Partition" Width="160" ToolTip="Add the configured data partition to the build configuration."/>
+                                            </Grid>
+
+                                            <TextBlock Text="VHDX Partition Layout" FontWeight="SemiBold" Margin="0,0,0,8"/>
+
+                                            <Grid Margin="0,0,0,12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <ListView x:Name="lstDataPartitions" Grid.Column="0" Height="220" Margin="0" SelectionMode="Single" BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Auto"/>
+                                                <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Top">
+                                                    <Button x:Name="btnMoveDataPartitionTop" Content="&#x2912;" Width="40" Height="40" FontSize="28" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Padding="0" Margin="0,0,0,8" ToolTip="Move selected data partition to the top of the data partition group" />
+                                                    <Button x:Name="btnMoveDataPartitionUp" Content="&#x2191;" Width="40" Height="40" FontSize="28" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Padding="0" Margin="0,0,0,8" ToolTip="Move selected data partition up" />
+                                                    <Button x:Name="btnMoveDataPartitionDown" Content="&#x2193;" Width="40" Height="40" FontSize="28" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Padding="0" Margin="0,0,0,8" ToolTip="Move selected data partition down" />
+                                                    <Button x:Name="btnMoveDataPartitionBottom" Content="&#x2913;" Width="40" Height="40" FontSize="28" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Padding="0" ToolTip="Move selected data partition to the bottom of the data partition group" />
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,0">
+                                                <Button x:Name="btnRemoveSelectedDataPartitions" Content="Remove Selected" Width="140" Margin="0,0,8,0" ToolTip="Remove checked data partitions or the Recovery partition from the list."/>
+                                                <Button x:Name="btnClearDataPartitions" Content="Clear" Width="80" ToolTip="Clear all additional data partitions."/>
+                                                <Button x:Name="btnResetDiskLayoutToDefaults" Content="Reset to Default" Width="140" Margin="8,0,0,0" ToolTip="Restore the default partition layout and remove all additional data partitions. Disk Size and Logical Sector Size are not changed."/>
+                                                <Button x:Name="btnRestoreRecoveryPartition" Content="Restore Recovery" Width="140" Margin="8,0,0,0" Visibility="Collapsed" ToolTip="Restore the Windows Recovery partition after removing it."/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Expander>
                                     <!-- Logical Sector Size -->
                                     <TextBlock Text="Logical Sector Size" Margin="0,0,0,8" ToolTip="Unit32 value of 512 or 4096. Useful for 4Kn drives or devices shipping with UFS drives. Default is 512."/>
                                     <ComboBox x:Name="cmbLogicalSectorSize" HorizontalAlignment="Left" ToolTip="Unit32 value of 512 or 4096. Useful for 4Kn drives or devices shipping with UFS drives. Default is 512.">
@@ -632,11 +639,11 @@
     
                                                 <!-- Command Line -->
                                                 <TextBlock Text="Command Line:" Margin="0,0,0,8"/>
-                                                <TextBox x:Name="txtAppCommandLine" Margin="0,0,0,20" ToolTip="Enter the full path to the command line to install the application. This should start with D:\Win32 for exe, cmd, etc types of deployments (e.g. D:\Win32\Mozilla FireFox\setup.exe). For MSI installs, use msiexec and then fill in the rest of the arguments in the arguments field."/>
+                                                <TextBox x:Name="txtAppCommandLine" Margin="0,0,0,20" ToolTip="Enter the full path to the command line to install the application. Use %FFUAppsRoot%\Win32 for exe, cmd, etc types of deployments (e.g. %FFUAppsRoot%\Win32\Mozilla FireFox\setup.exe). Legacy D:\Win32 paths are still supported. For MSI installs, use msiexec and then fill in the rest of the arguments in the arguments field."/>
     
                                                 <!-- Arguments -->
                                                 <TextBlock Text="Arguments:" Margin="0,0,0,8"/>
-                                                <TextBox x:Name="txtAppArguments" Margin="0,0,0,20" ToolTip="Enter the arguments for the command line. If the application is an msi, the command line should only contain msiexec and the rest of the command line arguments would go here (e.g. /i &quot;D:\Win32\Mozilla firefox\setup.msi&quot; /qn /norestart)."/>
+                                                <TextBox x:Name="txtAppArguments" Margin="0,0,0,20" ToolTip="Enter the arguments for the command line. If the application is an msi, the command line should only contain msiexec and the rest of the command line arguments would go here (e.g. /i &quot;%FFUAppsRoot%\Win32\Mozilla firefox\setup.msi&quot; /qn /norestart). Legacy D:\Win32 paths are still supported."/>
     
                                                 <!-- Source -->
                                                 <TextBlock Text="Source:" Margin="0,0,0,8"/>

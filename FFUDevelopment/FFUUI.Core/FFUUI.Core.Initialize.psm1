@@ -258,6 +258,25 @@ function Initialize-UIControls {
     $State.Controls.cmbSystemPartitionDriveLetter = $window.FindName('cmbSystemPartitionDriveLetter')
     $State.Controls.cmbWindowsPartitionDriveLetter = $window.FindName('cmbWindowsPartitionDriveLetter')
     $State.Controls.cmbRecoveryPartitionDriveLetter = $window.FindName('cmbRecoveryPartitionDriveLetter')
+    $State.Controls.txtOSPartitionSizeGB = $window.FindName('txtOSPartitionSizeGB')
+    $State.Controls.txtRecoveryPartitionSizeGB = $window.FindName('txtRecoveryPartitionSizeGB')
+    $State.Controls.ellipseDiskLayoutCapacityStatus = $window.FindName('ellipseDiskLayoutCapacityStatus')
+    $State.Controls.txtDiskLayoutCapacityStatusValue = $window.FindName('txtDiskLayoutCapacityStatusValue')
+    $State.Controls.txtDataPartitionName = $window.FindName('txtDataPartitionName')
+    $State.Controls.cmbDataPartitionDriveLetter = $window.FindName('cmbDataPartitionDriveLetter')
+    $State.Controls.txtDataPartitionSizeGB = $window.FindName('txtDataPartitionSizeGB')
+    $State.Controls.chkDataPartitionFillRemaining = $window.FindName('chkDataPartitionFillRemaining')
+    $State.Controls.chkDataPartitionPersistDriveLetter = $window.FindName('chkDataPartitionPersistDriveLetter')
+    $State.Controls.btnAddDataPartition = $window.FindName('btnAddDataPartition')
+    $State.Controls.btnRemoveSelectedDataPartitions = $window.FindName('btnRemoveSelectedDataPartitions')
+    $State.Controls.btnClearDataPartitions = $window.FindName('btnClearDataPartitions')
+	$State.Controls.btnResetDiskLayoutToDefaults = $window.FindName('btnResetDiskLayoutToDefaults')
+    $State.Controls.btnRestoreRecoveryPartition = $window.FindName('btnRestoreRecoveryPartition')
+    $State.Controls.btnMoveDataPartitionTop = $window.FindName('btnMoveDataPartitionTop')
+    $State.Controls.btnMoveDataPartitionUp = $window.FindName('btnMoveDataPartitionUp')
+    $State.Controls.btnMoveDataPartitionDown = $window.FindName('btnMoveDataPartitionDown')
+    $State.Controls.btnMoveDataPartitionBottom = $window.FindName('btnMoveDataPartitionBottom')
+    $State.Controls.lstDataPartitions = $window.FindName('lstDataPartitions')
     $State.Controls.cmbLogicalSectorSize = $window.FindName('cmbLogicalSectorSize')
     $State.Controls.txtProductKey = $window.FindName('txtProductKey')
     $State.Controls.txtOfficePath = $window.FindName('txtOfficePath')
@@ -451,6 +470,8 @@ function Initialize-UIDefaults {
     $State.Controls.cmbSystemPartitionDriveLetter.SelectedItem = ($State.Controls.cmbSystemPartitionDriveLetter.Items | Where-Object { $_.Content -eq $State.Defaults.generalDefaults.SystemPartitionDriveLetter })
     $State.Controls.cmbWindowsPartitionDriveLetter.SelectedItem = ($State.Controls.cmbWindowsPartitionDriveLetter.Items | Where-Object { $_.Content -eq $State.Defaults.generalDefaults.WindowsPartitionDriveLetter })
     $State.Controls.cmbRecoveryPartitionDriveLetter.SelectedItem = ($State.Controls.cmbRecoveryPartitionDriveLetter.Items | Where-Object { $_.Content -eq $State.Defaults.generalDefaults.RecoveryPartitionDriveLetter })
+    $State.Controls.txtOSPartitionSizeGB.Clear()
+    $State.Data.createRecoveryPartition = $true
     $State.Controls.cmbLogicalSectorSize.SelectedItem = ($State.Controls.cmbLogicalSectorSize.Items | Where-Object { $_.Content -eq $State.Defaults.generalDefaults.LogicalSectorSize.ToString() })
    
     # Populate Windows Release, Version, and SKU comboboxes
@@ -812,6 +833,92 @@ function Initialize-DynamicUIElements {
 
     # Keep BYO application columns sized to the current visible content.
     Enable-ListViewColumnAutoResize -ListView $State.Controls.lstApplications -FixedColumnIndexes @(0)
+
+    # Disk Layout ListView setup
+    $diskLayoutGridView = New-Object System.Windows.Controls.GridView
+    $State.Controls.lstDataPartitions.View = $diskLayoutGridView
+
+    $itemStyleDataPartitions = New-Object System.Windows.Style([System.Windows.Controls.ListViewItem])
+    if ($null -ne $listViewItemBaseStyle) { $itemStyleDataPartitions.BasedOn = $listViewItemBaseStyle }
+    $itemStyleDataPartitions.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.ListViewItem]::HorizontalContentAlignmentProperty, [System.Windows.HorizontalAlignment]::Stretch)))
+    $State.Controls.lstDataPartitions.ItemContainerStyle = $itemStyleDataPartitions
+
+    Add-SelectableGridViewColumn -ListView $State.Controls.lstDataPartitions -State $State -HeaderCheckBoxKeyName "chkSelectAllDataPartitions" -ColumnWidth 60 -IsSelectablePropertyName "CanSelect" -HeaderToolTip "Select all removable partitions in the disk layout." -ItemToolTip "Select this partition for removal. System, MSR, and Windows partitions cannot be removed."
+    Add-SortableColumn -gridView $diskLayoutGridView -header "Name" -binding "Name" -width 180 -headerHorizontalAlignment Left
+
+    $driveLetterColumn = New-Object System.Windows.Controls.GridViewColumn
+    $driveLetterColumn.Header = "Drive Letter"
+    $driveLetterColumn.Width = 120
+    $driveLetterTemplate = New-Object System.Windows.DataTemplate
+    $driveLetterFactory = New-Object System.Windows.FrameworkElementFactory([System.Windows.Controls.ComboBox])
+    $driveLetterFactory.SetBinding([System.Windows.Controls.ItemsControl]::ItemsSourceProperty, (New-Object System.Windows.Data.Binding("DriveLetterOptions")))
+    $driveLetterBinding = New-Object System.Windows.Data.Binding("DriveLetter")
+    $driveLetterBinding.Mode = [System.Windows.Data.BindingMode]::TwoWay
+    $driveLetterBinding.UpdateSourceTrigger = [System.Windows.Data.UpdateSourceTrigger]::PropertyChanged
+    $driveLetterFactory.SetBinding([System.Windows.Controls.Primitives.Selector]::SelectedItemProperty, $driveLetterBinding)
+    $driveLetterFactory.SetBinding([System.Windows.Controls.Control]::IsEnabledProperty, (New-Object System.Windows.Data.Binding("CanEditDriveLetter")))
+    $driveLetterTemplate.VisualTree = $driveLetterFactory
+    $driveLetterColumn.CellTemplate = $driveLetterTemplate
+    $diskLayoutGridView.Columns.Add($driveLetterColumn)
+
+    $sizeColumn = New-Object System.Windows.Controls.GridViewColumn
+    $sizeColumn.Header = "Size (GB)"
+    $sizeColumn.Width = 120
+    $sizeTemplate = New-Object System.Windows.DataTemplate
+    $sizeFactory = New-Object System.Windows.FrameworkElementFactory([System.Windows.Controls.TextBox])
+    $sizeBinding = New-Object System.Windows.Data.Binding("SizeGB")
+    $sizeBinding.Mode = [System.Windows.Data.BindingMode]::TwoWay
+    $sizeBinding.UpdateSourceTrigger = [System.Windows.Data.UpdateSourceTrigger]::PropertyChanged
+    $sizeFactory.SetBinding([System.Windows.Controls.TextBox]::TextProperty, $sizeBinding)
+    $sizeFactory.SetBinding([System.Windows.Controls.Control]::IsEnabledProperty, (New-Object System.Windows.Data.Binding("CanEditSize")))
+    $sizeTemplate.VisualTree = $sizeFactory
+    $sizeColumn.CellTemplate = $sizeTemplate
+    $diskLayoutGridView.Columns.Add($sizeColumn)
+
+    $fillRemainingColumn = New-Object System.Windows.Controls.GridViewColumn
+    $fillRemainingColumn.Header = "Fill Remaining"
+    $fillRemainingColumn.Width = 140
+    $fillRemainingTemplate = New-Object System.Windows.DataTemplate
+    $fillRemainingGridFactory = New-Object System.Windows.FrameworkElementFactory([System.Windows.Controls.Grid])
+    $fillRemainingGridFactory.SetValue([System.Windows.FrameworkElement]::HorizontalAlignmentProperty, [System.Windows.HorizontalAlignment]::Stretch)
+    $fillRemainingFactory = New-Object System.Windows.FrameworkElementFactory([System.Windows.Controls.CheckBox])
+    $fillRemainingFactory.SetValue([System.Windows.FrameworkElement]::TagProperty, 'DiskLayoutFillRemaining')
+    $fillRemainingFactory.SetValue([System.Windows.Controls.Control]::ToolTipProperty, 'Use all remaining VHDX space for this partition. Only one partition can fill remaining space.')
+    $fillRemainingFactory.SetValue([System.Windows.FrameworkElement]::HorizontalAlignmentProperty, [System.Windows.HorizontalAlignment]::Center)
+    $fillRemainingFactory.SetValue([System.Windows.FrameworkElement]::VerticalAlignmentProperty, [System.Windows.VerticalAlignment]::Center)
+    $fillRemainingBinding = New-Object System.Windows.Data.Binding("FillRemaining")
+    $fillRemainingBinding.Mode = [System.Windows.Data.BindingMode]::TwoWay
+    $fillRemainingBinding.UpdateSourceTrigger = [System.Windows.Data.UpdateSourceTrigger]::PropertyChanged
+    $fillRemainingFactory.SetBinding([System.Windows.Controls.Primitives.ToggleButton]::IsCheckedProperty, $fillRemainingBinding)
+    $fillRemainingFactory.SetBinding([System.Windows.Controls.Control]::IsEnabledProperty, (New-Object System.Windows.Data.Binding("CanEditFillRemaining")))
+    $fillRemainingFactory.SetBinding([System.Windows.UIElement]::VisibilityProperty, (New-Object System.Windows.Data.Binding("FillRemainingVisibility")))
+    $fillRemainingGridFactory.AppendChild($fillRemainingFactory)
+    $fillRemainingTemplate.VisualTree = $fillRemainingGridFactory
+    $fillRemainingColumn.CellTemplate = $fillRemainingTemplate
+    $diskLayoutGridView.Columns.Add($fillRemainingColumn)
+
+    $persistDriveLetterColumn = New-Object System.Windows.Controls.GridViewColumn
+    $persistDriveLetterColumn.Header = "Persist Drive Letter"
+    $persistDriveLetterColumn.Width = 160
+    $persistDriveLetterTemplate = New-Object System.Windows.DataTemplate
+    $persistDriveLetterGridFactory = New-Object System.Windows.FrameworkElementFactory([System.Windows.Controls.Grid])
+    $persistDriveLetterGridFactory.SetValue([System.Windows.FrameworkElement]::HorizontalAlignmentProperty, [System.Windows.HorizontalAlignment]::Stretch)
+    $persistDriveLetterFactory = New-Object System.Windows.FrameworkElementFactory([System.Windows.Controls.CheckBox])
+    $persistDriveLetterFactory.SetValue([System.Windows.Controls.Control]::ToolTipProperty, 'Use the configured letter on physical devices. If cleared, deployed Windows assigns the next available letter from D: upward. The build VM always uses the configured letter. FFU deployment USB letters may be shifted.')
+    $persistDriveLetterFactory.SetValue([System.Windows.FrameworkElement]::HorizontalAlignmentProperty, [System.Windows.HorizontalAlignment]::Center)
+    $persistDriveLetterFactory.SetValue([System.Windows.FrameworkElement]::VerticalAlignmentProperty, [System.Windows.VerticalAlignment]::Center)
+    $persistDriveLetterBinding = New-Object System.Windows.Data.Binding("PersistDriveLetter")
+    $persistDriveLetterBinding.Mode = [System.Windows.Data.BindingMode]::TwoWay
+    $persistDriveLetterBinding.UpdateSourceTrigger = [System.Windows.Data.UpdateSourceTrigger]::PropertyChanged
+    $persistDriveLetterFactory.SetBinding([System.Windows.Controls.Primitives.ToggleButton]::IsCheckedProperty, $persistDriveLetterBinding)
+    $persistDriveLetterFactory.SetBinding([System.Windows.Controls.Control]::IsEnabledProperty, (New-Object System.Windows.Data.Binding("CanEditPersistDriveLetter")))
+    $persistDriveLetterFactory.SetBinding([System.Windows.UIElement]::VisibilityProperty, (New-Object System.Windows.Data.Binding("PersistDriveLetterVisibility")))
+    $persistDriveLetterGridFactory.AppendChild($persistDriveLetterFactory)
+    $persistDriveLetterTemplate.VisualTree = $persistDriveLetterGridFactory
+    $persistDriveLetterColumn.CellTemplate = $persistDriveLetterTemplate
+    $diskLayoutGridView.Columns.Add($persistDriveLetterColumn)
+
+    Update-AdditionalDataPartitionsListView -State $State
 
     # Apps Script Variables ListView setup
     # Bind ItemsSource to the data list

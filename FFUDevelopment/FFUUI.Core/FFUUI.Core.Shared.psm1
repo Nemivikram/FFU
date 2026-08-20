@@ -332,6 +332,9 @@ function Add-SelectableGridViewColumn {
         [Parameter(Mandatory)]
         [double]$ColumnWidth,
         [string]$IsSelectedPropertyName = "IsSelected",
+        [string]$IsSelectablePropertyName,
+        [string]$HeaderToolTip = 'Select or clear all selectable rows.',
+        [string]$ItemToolTip = 'Select this row.',
         [switch]$HeaderSelectionAffectsVisibleItemsOnly
     )
 
@@ -350,10 +353,12 @@ function Add-SelectableGridViewColumn {
     # Store header metadata, including whether select-all should only affect visible rows.
     $headerTagObject = [PSCustomObject]@{
         PropertyName                           = $IsSelectedPropertyName
+        SelectablePropertyName                 = $IsSelectablePropertyName
         ListViewControl                        = $ListView
         HeaderSelectionAffectsVisibleItemsOnly = [bool]$HeaderSelectionAffectsVisibleItemsOnly
     }
     $headerCheckBox.Tag = $headerTagObject
+    $headerCheckBox.ToolTip = $HeaderToolTip
 
     $headerCheckBox.Add_Checked({
             param($senderCheckBoxLocal, $eventArgsCheckedLocal)
@@ -379,7 +384,14 @@ function Add-SelectableGridViewColumn {
             }
 
             if ($collectionToUpdate.Count -gt 0) {
-                foreach ($item in $collectionToUpdate) { $item.$($localPropertyName) = $true }
+                foreach ($item in $collectionToUpdate) {
+                    $selectablePropertyName = $tagData.SelectablePropertyName
+                    if (-not [string]::IsNullOrWhiteSpace($selectablePropertyName) -and $null -ne $item.PSObject.Properties[$selectablePropertyName] -and -not [bool]$item.$selectablePropertyName) {
+                        $item.$($localPropertyName) = $false
+                        continue
+                    }
+                    $item.$($localPropertyName) = $true
+                }
                 $actualListView.Items.Refresh()
             }
         })
@@ -451,8 +463,12 @@ function Add-SelectableGridViewColumn {
 
     $checkBoxFactory = New-Object System.Windows.FrameworkElementFactory([System.Windows.Controls.CheckBox])
     $checkBoxFactory.SetBinding([System.Windows.Controls.CheckBox]::IsCheckedProperty, (New-Object System.Windows.Data.Binding($IsSelectedPropertyName)))
+    if (-not [string]::IsNullOrWhiteSpace($IsSelectablePropertyName)) {
+        $checkBoxFactory.SetBinding([System.Windows.Controls.CheckBox]::IsEnabledProperty, (New-Object System.Windows.Data.Binding($IsSelectablePropertyName)))
+    }
     $checkBoxFactory.SetValue([System.Windows.FrameworkElement]::HorizontalAlignmentProperty, [System.Windows.HorizontalAlignment]::Center)
     $checkBoxFactory.SetValue([System.Windows.FrameworkElement]::VerticalAlignmentProperty, [System.Windows.VerticalAlignment]::Center)
+    $checkBoxFactory.SetValue([System.Windows.Controls.Control]::ToolTipProperty, $ItemToolTip)
 
     # MODIFICATION: Store the actual ListView object in the item checkbox's Tag
     $tagObject = [PSCustomObject]@{
@@ -731,6 +747,14 @@ function Update-SelectAllHeaderCheckBoxState {
         $collectionToInspect = @($ListView.Items)
     }
 
+    $selectablePropertyName = $null
+    if ($null -ne $HeaderCheckBox.Tag -and $null -ne $HeaderCheckBox.Tag.PSObject.Properties['SelectablePropertyName']) {
+        $selectablePropertyName = [string]$HeaderCheckBox.Tag.SelectablePropertyName
+    }
+    if (-not [string]::IsNullOrWhiteSpace($selectablePropertyName)) {
+        $collectionToInspect = @($collectionToInspect | Where-Object { $null -eq $_.PSObject.Properties[$selectablePropertyName] -or [bool]$_.$selectablePropertyName })
+    }
+
     # If no items are available in the selected scope, force unchecked.
     if ($collectionToInspect.Count -eq 0) {
         $HeaderCheckBox.IsChecked = $false
@@ -771,6 +795,7 @@ function Invoke-ListViewItemToggle {
 
     $selectedItem = $ListView.SelectedItem
     if ($null -eq $selectedItem) { return }
+    if ($null -ne $selectedItem.PSObject.Properties['CanSelect'] -and -not [bool]$selectedItem.CanSelect) { return }
 
     # Store the current index to restore focus later
     $currentIndex = $ListView.SelectedIndex

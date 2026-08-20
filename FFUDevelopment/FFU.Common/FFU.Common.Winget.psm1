@@ -799,7 +799,7 @@ function Get-Apps {
     }
     
     # Invoke parallel processing in non-UI mode (no WindowObject or ListViewControl)
-    Invoke-ParallelProcessing -ItemsToProcess $itemsToProcess `
+    $parallelResults = Invoke-ParallelProcessing -ItemsToProcess $itemsToProcess `
         -IdentifierProperty 'Id' `
         -StatusProperty 'DownloadStatus' `
         -TaskType 'WingetDownload' `
@@ -1023,6 +1023,94 @@ function Install-WinGet {
     }
     WriteLog "WinGet installation complete."
 }
+
+function Get-WinGetComponentStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [version]$MinimumVersion = [version]"1.8.1911"
+    )
+
+    $moduleName = 'Microsoft.WinGet.Client'
+    $status = [PSCustomObject]@{
+        Success               = $false
+        NeedsUpdate           = $true
+        WinGetInstalled       = $false
+        WinGetNeedsUpdate     = $true
+        WinGetVersion         = "Unknown"
+        WinGetVersionObject   = $null
+        WinGetStatus          = "Unknown"
+        ModuleInstalled       = $false
+        ModuleNeedsUpdate     = $true
+        ModuleVersion         = "Not installed"
+        ModuleVersionObject   = $null
+        CmdletAvailable       = $false
+        ErrorMessage          = ""
+    }
+
+    try {
+        $installedModule = @(Get-InstalledModule -Name $moduleName -ErrorAction SilentlyContinue) | Sort-Object -Property Version -Descending | Select-Object -First 1
+        $availableModule = @(Get-Module -ListAvailable -Name $moduleName -ErrorAction SilentlyContinue) | Sort-Object -Property Version -Descending | Select-Object -First 1
+        $wingetModule = if ($null -ne $installedModule) { $installedModule } else { $availableModule }
+
+        if ($null -eq $wingetModule) {
+            $status.WinGetStatus = "$moduleName module is not installed."
+            WriteLog $status.WinGetStatus
+            return $status
+        }
+
+        $status.ModuleInstalled = $true
+        $status.ModuleVersion = $wingetModule.Version.ToString()
+        $status.ModuleVersionObject = [version]$wingetModule.Version
+        $status.ModuleNeedsUpdate = $status.ModuleVersionObject -lt $MinimumVersion
+        WriteLog "$moduleName module version detected: $($status.ModuleVersion)"
+
+        Import-Module -Name $moduleName -Force -ErrorAction Stop
+        $wingetVersionCommand = Get-Command -Name Get-WinGetVersion -ErrorAction SilentlyContinue
+        if ($null -eq $wingetVersionCommand) {
+            $status.WinGetStatus = "Get-WinGetVersion cmdlet is not available."
+            $status.ErrorMessage = $status.WinGetStatus
+            WriteLog $status.WinGetStatus
+            return $status
+        }
+
+        $status.CmdletAvailable = $true
+        $wingetVersion = Get-WinGetVersion -ErrorAction Stop
+        $wingetVersionText = [string]$wingetVersion
+        WriteLog "Get-WinGetVersion returned: $wingetVersionText"
+
+        if ([string]::IsNullOrWhiteSpace($wingetVersionText)) {
+            $status.WinGetVersion = "Not installed"
+            $status.WinGetStatus = "WinGet is not installed."
+            WriteLog $status.WinGetStatus
+            return $status
+        }
+
+        if ($wingetVersionText -match 'v?(\d+\.\d+\.\d+)') {
+            $parsedVersion = [version]$matches[1]
+            $status.WinGetInstalled = $true
+            $status.WinGetVersion = $parsedVersion.ToString()
+            $status.WinGetVersionObject = $parsedVersion
+            $status.WinGetNeedsUpdate = $parsedVersion -lt $MinimumVersion
+            $status.WinGetStatus = if ($status.WinGetNeedsUpdate) { "Update required" } else { $parsedVersion.ToString() }
+            $status.NeedsUpdate = $status.ModuleNeedsUpdate -or $status.WinGetNeedsUpdate
+            $status.Success = -not $status.NeedsUpdate
+            return $status
+        }
+
+        $status.WinGetStatus = "Version check failed."
+        $status.ErrorMessage = "Could not parse Get-WinGetVersion output: $wingetVersionText"
+        WriteLog $status.ErrorMessage
+        return $status
+    }
+    catch {
+        $status.ErrorMessage = $_.Exception.Message
+        $status.WinGetStatus = "Get-WinGetVersion failed."
+        WriteLog "Get-WinGetVersion failed: $($status.ErrorMessage)"
+        return $status
+    }
+}
+
 function Confirm-WinGetInstallation {
     [CmdletBinding()]
     param(
@@ -1032,12 +1120,11 @@ function Confirm-WinGetInstallation {
     
     WriteLog 'Checking if WinGet is installed...'
     $minVersion = [version]"1.8.1911"
-    
+    $wingetStatus = Get-WinGetComponentStatus -MinimumVersion $minVersion
+
     # Check WinGet PowerShell module
-    $wingetModule = Get-InstalledModule -Name Microsoft.Winget.Client -ErrorAction SilentlyContinue
-    $wingetModuleVersion = [version]$wingetModule.Version
-    if ($wingetModuleVersion -lt $minVersion -or -not $wingetModule) {
-        WriteLog 'Microsoft.Winget.Client module is not installed or is an older version. Installing the latest version...'
+    if ($wingetStatus.ModuleNeedsUpdate) {
+        WriteLog 'Microsoft.WinGet.Client module is not installed or is an older version. Installing the latest version...'
         
         # Handle PSGallery trust settings
         $PSGalleryTrust = (Get-PSRepository -Name 'PSGallery').InstallationPolicy
@@ -1046,30 +1133,49 @@ function Confirm-WinGetInstallation {
             Set-PSRepository -Name 'PSGallery' -InstallationPolicy Trusted
         }
         
-        Install-Module -Name Microsoft.Winget.Client -Force -Repository 'PSGallery'
+        Install-Module -Name Microsoft.WinGet.Client -Force -Repository 'PSGallery'
         
         if ($PSGalleryTrust -eq 'Untrusted') {
             WriteLog 'Setting PSGallery back to untrusted repository...'
             Set-PSRepository -Name 'PSGallery' -InstallationPolicy Untrusted
             WriteLog 'Done'
         }
+
+		$wingetStatus = Get-WinGetComponentStatus -MinimumVersion $minVersion
     }
     else {
-        WriteLog "Installed Microsoft.Winget.Client module version: $($wingetModule.Version)"
+		WriteLog "Installed Microsoft.WinGet.Client module version: $($wingetStatus.ModuleVersion)"
     }
+
+	if ($wingetStatus.ModuleNeedsUpdate) {
+		$message = "Microsoft.WinGet.Client module version $($wingetStatus.ModuleVersion) does not meet the minimum required version $minVersion."
+		WriteLog $message
+		throw $message
+	}
+
+	if (-not $wingetStatus.CmdletAvailable) {
+		$message = "Get-WinGetVersion cmdlet is not available from Microsoft.WinGet.Client. $($wingetStatus.ErrorMessage)"
+		WriteLog $message
+		throw $message
+	}
+
+	if (-not [string]::IsNullOrWhiteSpace($wingetStatus.ErrorMessage)) {
+		$message = "Unable to determine WinGet version by using Get-WinGetVersion. $($wingetStatus.ErrorMessage)"
+		WriteLog $message
+		throw $message
+	}
     
     # Check WinGet CLI
-    $wingetVersion = Get-WinGetVersion
-    if (-not $wingetVersion) {
+    if (-not $wingetStatus.WinGetInstalled) {
         WriteLog "WinGet is not installed. Installing WinGet..."
         Install-WinGet -Architecture $WindowsArch
     }
-    elseif ($wingetVersion -match 'v?(\d+\.\d+\.\d+)' -and [version]$matches[1] -lt $minVersion) {
-        WriteLog "The installed version of WinGet $($matches[1]) does not support downloading MSStore apps. Installing the latest version of WinGet..."
+    elseif ($wingetStatus.WinGetNeedsUpdate) {
+        WriteLog "The installed version of WinGet $($wingetStatus.WinGetVersion) does not support downloading MSStore apps. Installing the latest version of WinGet..."
         Install-WinGet -Architecture $WindowsArch
     }
     else {
-        WriteLog "Installed WinGet version: $wingetVersion"
+		WriteLog "Installed WinGet version: $($wingetStatus.WinGetVersion)"
     }
 }
 # --------------------------------------------------------------------------
@@ -1211,8 +1317,8 @@ function Add-Win32DependencySilentInstallCommands {
         return 5
     }
     
-    # Build the VM install base path for dependency payloads (matches D:\win32 layout)
-    $vmBasePath = "D:\win32\$ParentAppName"
+    # Build the VM install base path for dependency payloads on the Apps media.
+    $vmBasePath = "%FFUAppsRoot%\win32\$ParentAppName"
     if (-not [string]::IsNullOrEmpty($SubFolder)) {
         $vmBasePath = "$vmBasePath\$SubFolder"
     }
@@ -1426,13 +1532,13 @@ function Add-Win32SilentInstallCommand {
         }
     }
     
-    # Build the VM install base path (matches D:\win32 layout)
+    # Build the VM install base path on the Apps media.
     $basePath = $null
     if (-not [string]::IsNullOrWhiteSpace($BasePathOverride)) {
         $basePath = $BasePathOverride
     }
     else {
-        $basePath = "D:\win32\$AppFolder"
+        $basePath = "%FFUAppsRoot%\win32\$AppFolder"
         if (-not [string]::IsNullOrEmpty($SubFolder)) {
             $basePath = "$basePath\$SubFolder"
         }
@@ -1561,4 +1667,4 @@ function Add-Win32SilentInstallCommand {
 # --------------------------------------------------------------------------
 
 # Export functions needed by both BuildFFUVM and the UI Core module
-Export-ModuleMember -Function Get-Application, Get-Apps, Start-WingetAppDownloadTask, Confirm-WinGetInstallation, Add-Win32SilentInstallCommand, Install-Winget
+Export-ModuleMember -Function Get-Application, Get-Apps, Start-WingetAppDownloadTask, Confirm-WinGetInstallation, Get-WinGetComponentStatus, Add-Win32SilentInstallCommand, Install-Winget

@@ -1,8 +1,13 @@
 #Requires -RunAsAdministrator
 
+param(
+    [Parameter()]
+    [string]$BasePath = $(if ([string]::IsNullOrWhiteSpace([string]$env:FFUAppsRoot)) { "D:\MSStore" } else { Join-Path -Path ([string]$env:FFUAppsRoot).Trim().TrimEnd('\') -ChildPath "MSStore" })
+)
+
 # --- CONFIGURATION ---
 # Base path where application folders are located. Each subfolder represents one application.
-$basePath = "D:\MSStore"
+$basePath = $BasePath
 # Path for temporary files (e.g., for extracting archives). This will be created and cleaned up automatically.
 $tempBasePath = Join-Path -Path $env:TEMP -ChildPath "StoreAppInstall"
 

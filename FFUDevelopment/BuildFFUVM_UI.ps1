@@ -40,6 +40,7 @@ $script:uiState = [PSCustomObject]@{
     Data               = @{
         allDriverModels             = [System.Collections.Generic.List[PSCustomObject]]::new();
         appsScriptVariablesDataList = [System.Collections.Generic.List[PSCustomObject]]::new();
+        additionalDataPartitionsDataList = [System.Collections.Generic.List[PSCustomObject]]::new();
         versionData                 = $null; 
         vmSwitchMap                 = @{};
         logData                     = $null;
@@ -47,7 +48,8 @@ $script:uiState = [PSCustomObject]@{
         pollTimer                   = $null;
         currentBuildProcess         = $null;
         lastConfigFilePath          = $null;
-        loadedDeviceNamingMode      = $null
+        loadedDeviceNamingMode      = $null;
+        createRecoveryPartition     = $true
     };
     Flags              = @{
         installAppsForcedByUpdates        = $false;
@@ -338,7 +340,6 @@ $script:uiState.Controls.btnRun.Add_Click({
                 $script:uiState.Flags.isCleanupRunning = $true
 
                 $script:uiState.Data.pollTimer.Add_Tick({
-                        param($sender, $e)
                         $currentProcess = $script:uiState.Data.currentBuildProcess
 
                         # Read new lines from log
@@ -353,13 +354,13 @@ $script:uiState.Controls.btnRun.Add_Click({
                         }
 
                         if ($null -eq $currentProcess -or $null -eq $script:uiState.Data.pollTimer) {
-                            if ($null -ne $sender) { $sender.Stop() }
+                            if ($null -ne $script:uiState.Data.pollTimer) { $script:uiState.Data.pollTimer.Stop() }
                             $script:uiState.Data.pollTimer = $null
                             return
                         }
 
                         if ($currentProcess.HasExited) {
-                            if ($null -ne $sender) { $sender.Stop() }
+                            if ($null -ne $script:uiState.Data.pollTimer) { $script:uiState.Data.pollTimer.Stop() }
                             $script:uiState.Data.pollTimer = $null
 
                             if ($null -ne $script:uiState.Data.logStreamReader) {
@@ -416,9 +417,21 @@ $script:uiState.Controls.btnRun.Add_Click({
             $txtStatus = $script:uiState.Controls.txtStatus
             $progressBar.Visibility = 'Visible'
             $txtStatus.Text = "Starting FFU build..."
+
+            if (-not (Add-PendingAdditionalDataPartition -State $script:uiState)) {
+                $btnRun.IsEnabled = $true
+                $script:uiState.Controls.txtStatus.Text = "Build canceled: data partition configuration incomplete."
+                return
+            }
             
             # Gather config on the UI thread before starting the job
             $config = Get-UIConfig -State $script:uiState
+
+            if (-not (Test-DiskLayoutConfiguration -State $script:uiState -Config $config)) {
+                $btnRun.IsEnabled = $true
+                $script:uiState.Controls.txtStatus.Text = "Build canceled: disk layout validation failed."
+                return
+            }
 
             # Validate Additional FFU selection if enabled
             if ($config.BuildUSBDrive -and $config.CopyAdditionalFFUFiles -and (($null -eq $config.AdditionalFFUFiles) -or ($config.AdditionalFFUFiles.Count -eq 0))) {
@@ -621,7 +634,6 @@ $script:uiState.Controls.btnRun.Add_Click({
             
             # Add the Tick event handler
             $script:uiState.Data.pollTimer.Add_Tick({
-                    param($sender, $e)
                     # This scriptblock runs on the UI thread, so it can safely access script-scoped variables
                     $currentProcess = $script:uiState.Data.currentBuildProcess
                     
@@ -649,8 +661,8 @@ $script:uiState.Controls.btnRun.Add_Click({
 
                     # If process is somehow null or the timer has been nulled out, stop the timer
                     if ($null -eq $currentProcess -or $null -eq $script:uiState.Data.pollTimer) {
-                        if ($null -ne $sender) {
-                            $sender.Stop()
+                        if ($null -ne $script:uiState.Data.pollTimer) {
+                            $script:uiState.Data.pollTimer.Stop()
                         }
                         $script:uiState.Data.pollTimer = $null
                         return
@@ -659,8 +671,8 @@ $script:uiState.Controls.btnRun.Add_Click({
                     # Check if the build process has exited
                     if ($currentProcess.HasExited) {
                         # Stop the timer, we're done polling
-                        if ($null -ne $sender) {
-                            $sender.Stop()
+                        if ($null -ne $script:uiState.Data.pollTimer) {
+                            $script:uiState.Data.pollTimer.Stop()
                         }
                         $script:uiState.Data.pollTimer = $null
                         
@@ -698,9 +710,25 @@ $script:uiState.Controls.btnRun.Add_Click({
                         # Determine final status based on process exit code
                         $finalStatusText = "FFU build completed successfully."
                         if ($exitCode -ne 0) {
-                            $finalStatusText = "FFU build failed. Check FFUDevelopment.log for details."
+                            $failureDetail = $null
+                            if ($null -ne $script:uiState.Data.logData) {
+                                for ($logIndex = $script:uiState.Data.logData.Count - 1; $logIndex -ge 0; $logIndex--) {
+                                    $logLine = [string]$script:uiState.Data.logData[$logIndex]
+                                    if ($logLine -match '(?i)(Build validation failed|Exception|ERROR|already assigned|must be a single drive letter|must be unique)') {
+                                        $failureDetail = $logLine
+                                        break
+                                    }
+                                }
+                            }
+
+                            $finalStatusText = if ($failureDetail) { "FFU build failed. $failureDetail" } else { "FFU build failed. Check FFUDevelopment.log for details." }
                             WriteLog "BuildFFUVM.ps1 process failed with exit code: $exitCode"
-                            [System.Windows.MessageBox]::Show("The build process failed. Please check the $FFUDevelopmentPath\FFUDevelopment.log file for details.`n`nExit code: $exitCode", "Build Error", "OK", "Error") | Out-Null
+                            $buildErrorMessage = "The build process failed. Please check the $FFUDevelopmentPath\FFUDevelopment.log file for details."
+                            if ($failureDetail) {
+                                $buildErrorMessage += "`n`n$failureDetail"
+                            }
+                            $buildErrorMessage += "`n`nExit code: $exitCode"
+                            [System.Windows.MessageBox]::Show($buildErrorMessage, "Build Error", "OK", "Error") | Out-Null
                             $script:uiState.Controls.pbOverallProgress.Visibility = 'Collapsed'
                         }
                         else {

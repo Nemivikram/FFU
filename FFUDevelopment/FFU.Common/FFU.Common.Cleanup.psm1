@@ -69,6 +69,11 @@ function Invoke-FFUPostBuildCleanup {
                 WriteLog "CommonCleanup: Removing $store"
                 try { Remove-Item -LiteralPath $store -Recurse -Force -ErrorAction Stop } catch { WriteLog "CommonCleanup: Failed removing $store : $($_.Exception.Message)" }
             }
+            $wingetWin32AppsJson = Join-Path (Join-Path $AppsPath 'Orchestration') 'WinGetWin32Apps.json'
+            if (Test-Path -LiteralPath $wingetWin32AppsJson) {
+                WriteLog "CommonCleanup: Removing $wingetWin32AppsJson"
+                try { Remove-Item -LiteralPath $wingetWin32AppsJson -Force -ErrorAction Stop } catch { WriteLog "CommonCleanup: Failed removing $wingetWin32AppsJson : $($_.Exception.Message)" }
+            }
             $office = Join-Path $AppsPath 'Office'
             if ((Test-Path -LiteralPath $office) -and $InstallOffice) {
                 WriteLog "CommonCleanup: Checking for Office artifacts in $office"

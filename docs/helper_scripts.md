@@ -14,7 +14,7 @@ This section documents standalone helper scripts used outside the primary UI-dri
 
 ## Available helper scripts
 
-- [Create PE Media](/create_pemedia.html)
-- [USB Imaging Tool Creator](/usb_imaging_tool_creator.html)
+- [Create PE Media](/FFU/create_pemedia.html)
+- [USB Imaging Tool Creator](/FFU/usb_imaging_tool_creator.html)
 
 {% include page_nav.html %}

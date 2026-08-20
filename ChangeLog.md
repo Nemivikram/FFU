@@ -1,5 +1,38 @@
 # Change Log
 
+# 2608.1
+
+## What's Changed
+
+### Multiple Partition Support
+
+2608.1 introduces multiple partition support.
+
+The new Disk Layout expander is where you can specify additional partitions and also control the drive letters of the required partitions. Read more info in the Disk Layout section of the [Hyper-V Settings](https://rbalsleymsft.github.io/FFU/hyperv_settings.html) documentation.
+
+### Prevent Cleanmgr Hangs
+
+In some rare cases, disk cleanup would hang in the VM while it was building. https://github.com/rbalsleyMSFT/FFU/commit/2cb987aa4b381f86bf11447c8c6aab37554183eb
+
+### Handle Pending Reboots Before Sysprep
+
+When Run-Sysprep.ps1 is invoked, it will now detect pending reboot markers from CBS, Windows Update, WinSxS pending.xml, and items in the PendingFileRenameOperations registry entry. The VM will reboot, and re-run Run-Sysprep.ps1 to complete sysprep.
+
+### Added FFUOrchestrationBootstrap.log to the Build VM
+
+To help with troubleshooting why builds might be failing inside the build VM, a new `C:\Windows\Temp\FFUOrchestrationBootstrap.log` has been added.
+
+### Fixes
+
+- Added better error handling when VM fails to start #318 thanks @iambdud
+- Fixed an issue where winget check would fail if multiple versions existed #380 thanks @dodexahedron
+- Fixed an issue where when using an unattend file for device naming, during deployment the unattend file would be modified to include the device name for the device being imaged. The name would not be removed from the unattend file so future deployments would end up with the device name of the previous device https://github.com/rbalsleyMSFT/FFU/commit/e1c62590218736bb238d92bd697936c8ba93de69
+- Fixed an issue where the WinGetWin32Apps.json file could become stale if builds failed and the file wasn't cleaned up during the failure https://github.com/rbalsleyMSFT/FFU/commit/c32cb934349cb0d218698d7ead9f6c950e7d47a4
+- #495 thanks @configmatt
+- Fixed an issue with Dell driver OS architecture look ups. This should improve some models where drivers may have been missing https://github.com/rbalsleyMSFT/FFU/commit/895728ebe84cc399174d848e959ee11ddb357448
+- Fixed a logging issue where the logs would suggest multiple FFU files were being copied to the USB when only one was copied https://github.com/rbalsleyMSFT/FFU/commit/4b2e6457515713baded2ca867ef9ab8d3a55ad07
+- Fixed an issue with Lenovo driver downloads https://github.com/rbalsleyMSFT/FFU/commit/16d466a9c30456931056c4d301b69a6fb128a772
+
 # 2604.1
 
 ## What's Changed
@@ -653,7 +686,7 @@ Would result in:
 ### Fixes
 
 - Fix an issue with removal of Defender/OneDrive/Edge after FFU is complete
-- Migrate Winget downloads to use [Export-WingetPackage cmdlet](https://github.com/microsoft/winget-cli/blob/master/doc/specs/%23658%20-%20WinGet%20Download.md#winget-powershell-cmdlet) as per issue #50
+- Migrate Winget downloads to use [Export-WingetPackage cmdlet](<https://github.com/microsoft/winget-cli/blob/master/doc/specs/%23658%20-%20WinGet%20Download.md#winget-powershell-cmdlet>) as per issue #50
 - Add support for preview updates https://github.com/rbalsleyMSFT/FFU/pull/51 - thanks to @HedgeComp
 - Refactor validation of Unattend/prefixes, PPKG, Autopilot to check for these files early in the process, similar to how we check for drivers
 - Add better logging when unable to find HDD when applying FFU. Will inform to add WinPE drivers to Deployment Media if HDD not found.
@@ -674,10 +707,10 @@ In adding this support, I do realize that there is potential for data loss for t
 
 To handle this, with help from [HedgeComp](https://github.com/HedgeComp), we've refactored the `Get-USBDrives` function. Two new variables have been created:
 
-| Parameter                   | Type | Description                                                                                                                                                                                                                                                                                                                                    |
-| --------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| AllowExternalHardDiskMedia  | Bool | If `$true`, will allow the use of media identified as External Hard Disk media via WMI class Win32_DiskDrive. Default is not defined.                                                                                                                                                                                                        |
-| PromptExternalHardDiskMedia | Bool | If `$true` and AllowExternalHardDiskMedia is `$true`, the script will prompt to select which drive to use. When set to `$true`, only a single drive will be created. If `$false`, the script won't prompt for which external hard disk to use and can use multiple external hard disks, similar to how removable USB drives function. |
+| Parameter                   | Type | Description                                                                                                                                                                                                                                                                                                                                   |
+| --------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AllowExternalHardDiskMedia  | Bool | If`$true`, will allow the use of media identified as External Hard Disk media via WMI class Win32_DiskDrive. Default is not defined.                                                                                                                                                                                                        |
+| PromptExternalHardDiskMedia | Bool | If`$true` and AllowExternalHardDiskMedia is `$true`, the script will prompt to select which drive to use. When set to `$true`, only a single drive will be created. If `$false`, the script won't prompt for which external hard disk to use and can use multiple external hard disks, similar to how removable USB drives function. |
 
 By default, this functionality won't effect previous USB drive creation behavior. However if you want to take advantage of the new functionality, set `-AllowExternalHardDiskMedia $true`
 
@@ -770,7 +803,7 @@ There are likely going to be bugs with this, but in my testing things seem to wo
 | Make           | String    | Used for automatically downloading drivers. Valid values are 'Microsoft', 'Dell', 'HP', 'Lenovo'. The script will throw an error if any other string value is used.                                                                                                                                                                       |
 | Model          | String    | Used for automatically downloading drivers with the Make parameter.                                                                                                                                                                                                                                                                       |
 | DriversFolder  | String    | Location where Drivers will either be downloaded, and/or the location of the drivers you wish to be added to the FFU, or copied to the deploy partition of the USB drive. The default location is $FFUDevelopmentPath\Drivers (e.g. C:\FFUDevelopmentPath\Drivers                                                                         |
-| CleanupDrivers | Bool      | Used to delete the drivers folders underneath the `$DriversFolder` path (e.g. C:\FFUDevelopmentPath\Drivers\HP) after the FFU has been built. Default is `$true`true                                                                                                                                                                  |
+| CleanupDrivers | Bool      | Used to delete the drivers folders underneath the`$DriversFolder` path (e.g. C:\FFUDevelopmentPath\Drivers\HP) after the FFU has been built. Default is `$true`true                                                                                                                                                                   |
 | UserAgent      | String    | The useragent string is used when invoking Invoke-Webrequest or Invoke-RestMethod. This has been helpful when interacting with the Microsoft Download Center and preventing intermittent errors. Default is Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0 |
 | Headers        | Hashtable | This hash table is used in conjunction with the Useragent when invoking Invoke-Webrequest or Invoke-RestMethod. This has been helpful when interacting with the Microsoft Download Center and preventing intermittent errors. If interested in the default value, reference the script itself.                                            |
 

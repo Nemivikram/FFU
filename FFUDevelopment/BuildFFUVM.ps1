@@ -545,6 +545,7 @@ if ($ConfigFile -and (Test-Path -Path $ConfigFile)) {
         $valueIsEmptyString = ($value -is [string]) -and [string]::IsNullOrEmpty($value)
         $valueIsEmptyArray = ($value -is [System.Array]) -and ($value.Count -eq 0)
         $valueIsEmptyHashtable = ($value -is [System.Collections.Hashtable]) -and ($value.Count -eq 0)
+        $valueIsEmptyCustomObject = ($value -is [System.Management.Automation.PSCustomObject]) -and (@($value.PSObject.Properties).Count -eq 0)
         $valueIsZero = (($value -is [System.UInt32]) -or ($value -is [System.UInt64]) -or ($value -is [System.Int32])) -and ($value -eq 0)
         
         # If $value is empty, skip
@@ -552,6 +553,7 @@ if ($ConfigFile -and (Test-Path -Path $ConfigFile)) {
             $valueIsEmptyString -or 
             $valueIsEmptyArray -or 
             $valueIsEmptyHashtable -or 
+            $valueIsEmptyCustomObject -or
             $valueIsZero) {
             continue
         }
@@ -5202,9 +5204,10 @@ function Remove-FFUVM {
 Function Get-USBDrive {
     # Log the start of the USB drive check
     WriteLog 'Checking for USB drives'
+    $hasConfiguredUSBDrives = ($null -ne $USBDriveList) -and ($USBDriveList.Count -gt 0)
     
     # Check if external hard disk media is allowed and user has not specified USB drives
-    If ($AllowExternalHardDiskMedia -and (-not($USBDriveList))) {
+    If ($AllowExternalHardDiskMedia -and (-not $hasConfiguredUSBDrives)) {
         # Get all removable and external hard disk media drives
         [array]$USBDrives = (Get-CimInstance -ClassName Win32_DiskDrive -Filter "MediaType='Removable Media' OR MediaType='External hard disk media'")
         [array]$ExternalHardDiskDrives = $USBDrives | Where-Object { $_.MediaType -eq 'External hard disk media' }
@@ -5308,7 +5311,7 @@ Function Get-USBDrive {
             }
         }
     }
-    elseif ($USBDriveList) {
+    elseif ($hasConfiguredUSBDrives) {
         # Log the count of specified USB drives
         # USBDriveList values can be a single UniqueId string, or an array of UniqueIds (multiple same-model drives)
         $USBDriveListCount = 0
